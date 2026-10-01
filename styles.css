@@ -189,3 +189,45 @@ dialog input[type=text] { width: 100%; min-height: 44px; padding: 0 12px; border
 }
 :root[data-theme="dark"] { --bg-hole: #2a2415; }
 @media (prefers-reduced-motion: reduce) { .disc-art { animation: none; } }
+
+/* ---------- Horizontal (celular o tablet acostado): disposición como la versión de PC ----------
+   Deck A | mezclador al centro | Deck B, y la biblioteca debajo. */
+@media (orientation: landscape) and (min-width: 640px) {
+  main { grid-template-columns: minmax(0, 1fr) minmax(200px, .66fr) minmax(0, 1fr); max-width: none; gap: 8px; padding: 8px; align-items: stretch; }
+  .decks { display: contents; }
+  #deckA { grid-column: 1; grid-row: 1; }
+  .mixer { grid-column: 2; grid-row: 1; align-content: start; }
+  #deckB { grid-column: 3; grid-row: 1; }
+  .lib { grid-column: 1 / -1; grid-row: 2; position: static; max-height: none; overflow: visible; }
+  .card { padding: 8px 10px; border-radius: 14px; }
+  .top { padding: 4px 12px; position: static; }
+  .top img { width: 30px; height: 30px; }
+  .ibtn { height: 34px; }
+  .disc { width: 74px; height: 74px; padding: 4px; }
+  .title { font-size: 15px; }
+  .ctl { gap: 6px; }
+  .btn { min-height: 38px; min-width: 38px; padding: 0 9px; font-size: 13px; }
+  .btn.play { min-width: 52px; }
+  .vol { margin-top: 0; }
+  input[type=range] { height: 26px; }
+  .seek { margin-top: 2px; }
+  .mixer { gap: 4px; }
+  .mixer .row { gap: 6px; }
+  .mixer label { font-size: 12px; }
+  .row-s .btn { min-height: 34px; min-width: 34px; }
+}
+@media (orientation: landscape) and (min-width: 640px) and (min-height: 700px) {
+  .disc { width: 110px; height: 110px; padding: 5px; }
+  .btn { min-height: 44px; font-size: 15px; }
+}
+@media (orientation: landscape) and (min-width: 640px) {
+  .mixer { min-width: 0; }
+  .mixer label { white-space: normal; }
+  .mixer label.grow { display: flex; width: 100%; }
+  .mixer input[type=range] { min-width: 0 !important; flex: 1; }
+  .mixer .xf { min-width: 0; }
+  #mixBtn { flex-basis: 100%; }
+  .btn { padding: 0 7px; font-size: 12.5px; }
+  .ctl { gap: 5px; flex-wrap: nowrap; }
+  .btn.play { min-width: 46px; }
+}

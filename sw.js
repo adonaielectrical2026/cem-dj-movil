@@ -1,6 +1,6 @@
 'use strict';
 // Guarda la app en el equipo para que abra sin internet. Subir el número de versión cuando se cambie algún archivo.
-const CACHE = 'cem-dj-movil-1';
+const CACHE = 'cem-dj-movil-2';
 const FILES = ['./', 'index.html', 'app.js', 'styles.css', 'bpm.js', 'lufs.js', 'manifest.webmanifest', 'logo.jpg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
