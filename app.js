@@ -1,10 +1,11 @@
 'use strict';
 /* ============================================================
-   CEM DJ móvil: versión sencilla para celular y tablet.
-   2 decks, crossfader con mezcla automática, EQ, nivelación de volumen (LUFS), BPM + SYNC,
-   "sin voz" rápido, biblioteca y listas guardadas en el propio equipo (IndexedDB).
+   CEM DJ móvil: reproductor de música para celular y tablet (estilo reproductor, con los colores del CEM).
+   Canciones y listas guardadas en el propio equipo (IndexedDB), mezcla suave entre canciones (crossfade con 2 motores de audio),
+   nivelación de volumen (LUFS), "sin voz" rápido y ecualizador de 3 bandas.
    ============================================================ */
 const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const fmt = (s) => { if (!isFinite(s) || s == null) return '–:––'; s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const store = {
@@ -16,14 +17,23 @@ function toast(msg, ms = 2800) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
-
+const svg = (d) => `<svg viewBox="0 0 24 24"><path d="${d}"/></svg>`;
 const ICON = {
-  play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
-  pause: '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
-  restart: '<svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg>',
-  more: '<svg viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>',
-  moon: '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>',
-  sun: '<svg viewBox="0 0 24 24"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z"/></svg>',
+  play: svg('M8 5v14l11-7z'),
+  pause: svg('M6 5h4v14H6zM14 5h4v14h-4z'),
+  next: svg('M6 18l8.5-6L6 6zM16 6h2v12h-2z'),
+  prev: svg('M6 6h2v12H6zM9.5 12l8.5 6V6z'),
+  shuffle: svg('M10.6 9.2 5.4 4 4 5.4l5.2 5.2zM14.5 4l2.1 2.1L4 18.6 5.4 20 18 7.4 20 9.5V4zM14.8 13.4l-1.4 1.4 3.2 3.2L14.5 20H20v-5.5l-2.1 2.1z'),
+  repeat: svg('M7 7h10v3l4-4-4-4v3H5v6h2zM17 17H7v-3l-4 4 4 4v-3h12v-6h-2z'),
+  plus: svg('M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z'),
+  more: svg('M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'),
+  down: svg('M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z'),
+  back: svg('M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z'),
+  songs: svg('M12 3v10.55A4 4 0 1 0 14 17V7h4V3z'),
+  lists: svg('M15 6H3v2h12zm0 4H3v2h12zM3 16h8v-2H3zM17 6v8.18A3 3 0 1 0 19 17V8h3V6z'),
+  settings: svg('M3 17v2h6v-2zM3 5v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z'),
+  vol: svg('M3 9v6h4l5 5V4L7 9zM16.5 12A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z'),
+  logo: 'logo.jpg',
 };
 
 /* ---------------- Base de datos local (canciones) ---------------- */
@@ -82,7 +92,7 @@ function id3Pic(b) {
   const enc = b[0];
   let i = 1; while (i < b.length && b[i] !== 0) i++;
   const mime = String.fromCharCode(...b.subarray(1, i));
-  i += 2; // fin del tipo MIME + tipo de imagen
+  i += 2;
   if (enc === 0 || enc === 3) { while (i < b.length && b[i] !== 0) i++; i++; }
   else { while (i + 1 < b.length && !(b[i] === 0 && b[i + 1] === 0)) i += 2; i += 2; }
   const data = b.subarray(i);
@@ -91,19 +101,13 @@ function id3Pic(b) {
   return new Blob([data], { type });
 }
 
-/* ---------------- Audio: grafo general ---------------- */
+/* ---------------- Ajustes ---------------- */
+const S = Object.assign({ xfade: 6, level: true, novoice: false, eq: { low: 0, mid: 0, high: 0 }, vol: 90, shuffle: false, repeat: 'off' }, store.get('cem.s', {}));
+S.eq = Object.assign({ low: 0, mid: 0, high: 0 }, S.eq);
+const saveS = () => store.set('cem.s', S);
+
+/* ---------------- Audio: dos motores para poder mezclar ---------------- */
 let AC = null, master, limiter;
-function ensureAudio() {
-  if (AC) return AC;
-  AC = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
-  master = AC.createGain(); master.gain.value = (+$('#master').value) / 100;
-  limiter = AC.createDynamicsCompressor();
-  limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.1;
-  master.connect(limiter).connect(AC.destination);
-  decks.forEach((d) => d.build());
-  applyXfade();
-  return AC;
-}
 
 // "Sin voz" rápido: se cancela lo que está al centro (voz) y se conservan los graves
 function karaokeChain(c, input, sum) {
@@ -125,67 +129,15 @@ function karaokeChain(c, input, sum) {
   return { dry, wet };
 }
 
-/* ---------------- Biblioteca (estado) ---------------- */
-const songs = new Map();          // id -> canción
-let lists = store.get('cem.lists', []); // [{id,name,ids:[]}]
-let view = 'all';                 // 'all' o id de lista
-const saveLists = () => store.set('cem.lists', lists);
-
-/* ---------------- Deck ---------------- */
-class Deck {
-  constructor(k, idx) {
-    this.k = k; this.idx = idx; this.el = $('#deck' + k);
+class Engine {
+  constructor() {
     this.audio = new Audio(); this.audio.preload = 'auto';
-    this.song = null; this.url = null; this.coverUrl = null;
-    this.queue = null; this.qi = -1; this.seeking = false; this.synced = false; this.noVoice = false;
-    this.el.innerHTML = `
-      <div class="deck-top">
-        <div class="disc"><div class="disc-art"></div></div>
-        <div class="deck-info">
-          <span class="tag">DECK ${k}</span>
-          <div class="title">Elige una canción</div>
-          <div class="artist"></div>
-          <div class="meta"><span class="time">0:00</span><span>/ <span class="dur">–:––</span></span><span class="bpm badge"></span></div>
-        </div>
-      </div>
-      <input class="seek" type="range" min="0" max="1000" value="0" aria-label="Posición">
-      <div class="ctl">
-        <button class="btn restart" aria-label="Volver al inicio">${ICON.restart}</button>
-        <button class="btn play" aria-label="Reproducir o pausar">${ICON.play}</button>
-        <button class="btn sync">SYNC</button>
-        <button class="btn novoz">Sin voz</button>
-        <button class="btn eqbtn">EQ</button>
-      </div>
-      <div class="vol"><span>Vol</span><input class="volr" type="range" min="0" max="100" value="100" aria-label="Volumen del deck ${k}"></div>
-      <div class="eq" hidden>
-        <label>Graves<input type="range" min="-12" max="12" step="0.5" value="0" data-band="low"></label>
-        <label>Medios<input type="range" min="-12" max="12" step="0.5" value="0" data-band="mid"></label>
-        <label>Agudos<input type="range" min="-12" max="12" step="0.5" value="0" data-band="high"></label>
-      </div>`;
-    const q = (s) => this.el.querySelector(s);
-    this.ui = { art: q('.disc-art'), title: q('.title'), artist: q('.artist'), time: q('.time'), dur: q('.dur'), bpm: q('.bpm'), seek: q('.seek'), play: q('.play'), sync: q('.sync'), novoz: q('.novoz'), eq: q('.eq') };
-    this.ui.art.style.backgroundImage = 'url(logo.jpg)';
-    this.ui.play.onclick = () => this.toggle();
-    q('.restart').onclick = () => { if (this.song) this.audio.currentTime = 0; };
-    this.ui.sync.onclick = () => this.sync();
-    this.ui.novoz.onclick = () => this.setNoVoice(!this.noVoice);
-    q('.eqbtn').onclick = (e) => { this.ui.eq.hidden = !this.ui.eq.hidden; e.currentTarget.classList.toggle('on', !this.ui.eq.hidden); };
-    q('.volr').oninput = (e) => { if (this.fader) this.fader.gain.value = e.target.value / 100; };
-    this.el.querySelectorAll('[data-band]').forEach((r) => {
-      r.oninput = () => { if (this[r.dataset.band]) this[r.dataset.band].gain.value = +r.value; };
-      r.ondblclick = () => { r.value = 0; r.oninput(); };
-    });
-    const s = this.ui.seek;
-    s.addEventListener('pointerdown', () => { this.seeking = true; });
-    s.addEventListener('pointerup', () => { this.seeking = false; });
-    s.oninput = () => { if (this.audio.duration) this.audio.currentTime = (s.value / 1000) * this.audio.duration; };
-    this.audio.addEventListener('play', () => this.onState());
-    this.audio.addEventListener('pause', () => this.onState());
-    this.audio.addEventListener('ended', () => this.onEnded());
-    this.audio.addEventListener('loadedmetadata', () => { this.ui.dur.textContent = fmt(this.audio.duration); });
-    this.audio.addEventListener('error', () => { if (this.song) toast('No se pudo reproducir «' + this.song.title + '». Prueba con otro formato (MP3 o M4A).', 4500); });
+    this.song = null; this.url = null;
+    this.audio.addEventListener('play', onPlayState);
+    this.audio.addEventListener('pause', onPlayState);
+    this.audio.addEventListener('ended', () => onEnded(this));
+    this.audio.addEventListener('error', () => { if (this.song && P.cur === this) { toast('No se pudo reproducir «' + this.song.title + '».', 4000); setTimeout(() => P.next(true), 600); } });
   }
-
   build() {
     if (this.built) return; this.built = true;
     const c = AC;
@@ -197,161 +149,165 @@ class Deck {
     this.low = c.createBiquadFilter(); this.low.type = 'lowshelf'; this.low.frequency.value = 250;
     this.mid = c.createBiquadFilter(); this.mid.type = 'peaking'; this.mid.frequency.value = 1000; this.mid.Q.value = 1;
     this.high = c.createBiquadFilter(); this.high.type = 'highshelf'; this.high.frequency.value = 4000;
-    this.fader = c.createGain(); this.fader.gain.value = this.el.querySelector('.volr').value / 100;
     this.xf = c.createGain();
-    sum.connect(this.low).connect(this.mid).connect(this.high).connect(this.fader).connect(this.xf).connect(master);
-    this.el.querySelectorAll('[data-band]').forEach((r) => { this[r.dataset.band].gain.value = +r.value; });
-    this.setNoVoice(this.noVoice, true);
+    sum.connect(this.low).connect(this.mid).connect(this.high).connect(this.xf).connect(master);
+    this.applyFx();
+  }
+  applyFx() {
+    if (!this.built) return;
+    const t = AC.currentTime;
+    for (const b of ['low', 'mid', 'high']) this[b].gain.value = S.eq[b];
+    this.kar.dry.gain.setTargetAtTime(S.novoice ? 0 : 1, t, 0.04);
+    this.kar.wet.gain.setTargetAtTime(S.novoice ? 1 : 0, t, 0.04);
     this.applyNorm();
   }
-
-  load(song, queue = null, qi = -1, autoplay = false) {
-    ensureAudio();
-    if (this.url) URL.revokeObjectURL(this.url);
-    if (this.coverUrl) URL.revokeObjectURL(this.coverUrl);
-    this.audio.pause();
-    this.song = song; this.queue = queue; this.qi = qi;
-    this.url = URL.createObjectURL(song.blob);
-    this.audio.src = this.url; this.audio.load();
-    this.audio.playbackRate = 1; this.synced = false; this.ui.sync.classList.remove('on');
-    this.coverUrl = song.cover ? URL.createObjectURL(song.cover) : null;
-    this.ui.art.style.backgroundImage = `url(${this.coverUrl || 'logo.jpg'})`;
-    this.ui.title.textContent = song.title;
-    this.ui.artist.textContent = song.artist || '';
-    this.ui.dur.textContent = fmt(song.dur); this.ui.time.textContent = '0:00'; this.ui.seek.value = 0;
-    this.showBpm();
-    this.applyNorm();
-    this.onState();
-    renderLib();
-    if (autoplay) this.play();
-    else if (!song.analyzed) analyzeSoon(song);
-  }
-
-  showBpm() {
-    const s = this.song; const r = this.audio.playbackRate;
-    this.ui.bpm.textContent = s && s.bpm ? Math.round(s.bpm * r) + ' BPM' + (Math.abs(r - 1) > 0.002 ? ` (${r > 1 ? '+' : ''}${((r - 1) * 100).toFixed(1)}%)` : '') : (s && !s.analyzed ? 'analizando…' : '');
-  }
-
   applyNorm() {
-    if (!this.norm) return;
+    if (!this.built) return;
     const s = this.song; let g = 1;
-    if (s && $('#autoLevel').checked && s.lufs != null) {
+    if (s && S.level && s.lufs != null) {
       let db = Math.max(-12, Math.min(9, -14 - s.lufs));
       if (s.peak > 0) db = Math.min(db, -20 * Math.log10(s.peak) - 0.5); // que no se pase de 0 dB
       g = Math.pow(10, db / 20);
     }
     this.norm.gain.setTargetAtTime(g, AC.currentTime, 0.05);
   }
+  setSong(song) {
+    if (this.url) URL.revokeObjectURL(this.url);
+    this.song = song; this.url = URL.createObjectURL(song.blob);
+    this.audio.src = this.url; this.audio.load();
+    this.applyNorm();
+  }
+}
+const engines = [new Engine(), new Engine()];
 
-  async play() {
-    if (!this.song) return toast('Elige una canción para el deck ' + this.k);
+function ensureAudio() {
+  if (AC) return AC;
+  AC = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' });
+  master = AC.createGain(); master.gain.value = S.vol / 100;
+  limiter = AC.createDynamicsCompressor();
+  limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.1;
+  master.connect(limiter).connect(AC.destination);
+  engines.forEach((e) => e.build());
+  return AC;
+}
+
+/* ---------------- Biblioteca (estado) ---------------- */
+const songs = new Map();          // id -> canción
+let lists = store.get('cem.lists', []); // [{id,name,ids:[]}]
+let openList = null;              // id de la lista abierta en "Listas"
+const saveLists = () => store.set('cem.lists', lists);
+const arts = new Map();           // id -> url de carátula
+const artUrl = (s) => { if (!s || !s.cover) return ICON.logo; if (!arts.has(s.id)) arts.set(s.id, URL.createObjectURL(s.cover)); return arts.get(s.id); };
+
+/* ---------------- Reproductor (cola, mezcla, aleatorio, repetir) ---------------- */
+const P = {
+  cur: null, queue: [], idx: -1, base: [], fading: false, fadeTimer: 0, old: null,
+  get song() { return this.cur && this.cur.song; },
+  playing() { return engines.some((e) => e.song && !e.audio.paused); },
+
+  start(ids, i) { // empezar una cola nueva
+    this.base = ids.slice();
+    const first = ids[i];
+    if (S.shuffle) { this.queue = shuffled(ids, first); this.idx = 0; } else { this.queue = ids.slice(); this.idx = i; }
+    this.goTo(this.idx, 0);
+  },
+  nextIdx(auto) {
+    if (!this.queue.length) return -1;
+    if (auto && S.repeat === 'one') return this.idx;
+    const n = this.idx + 1;
+    if (n < this.queue.length) return n;
+    return S.repeat === 'all' ? 0 : -1;
+  },
+  next(auto) {
+    const n = this.nextIdx(auto);
+    if (n < 0) { if (auto) this.stopAll(); return; }
+    this.goTo(n, auto ? S.xfade : Math.min(S.xfade, 1.2));
+  },
+  prev() {
+    if (!this.cur) return;
+    if (this.cur.audio.currentTime > 3 || this.queue.length < 2) { this.cur.audio.currentTime = 0; return; }
+    let p = this.idx - 1; if (p < 0) p = S.repeat === 'all' ? this.queue.length - 1 : 0;
+    this.goTo(p, Math.min(S.xfade, 1.2));
+  },
+  stopAll() { this.endFade(); engines.forEach((e) => e.audio.pause()); },
+  toggle() {
+    if (!this.cur) return;
+    if (this.cur.audio.paused) { ensureAudio(); (AC.state !== 'running' ? AC.resume() : Promise.resolve()).then(() => this.cur.audio.play().catch(() => {})); }
+    else { this.endFade(); this.cur.audio.pause(); }
+  },
+  endFade() { // termina una mezcla en curso de golpe
+    clearTimeout(this.fadeTimer); this.fading = false;
+    if (this.old) { this.old.audio.pause(); this.old = null; }
+    if (this.cur && this.cur.built) { this.cur.xf.gain.cancelScheduledValues(AC.currentTime); this.cur.xf.gain.value = 1; }
+  },
+  async goTo(i, fade) {
+    const song = songs.get(this.queue[i]);
+    if (!song) { this.queue.splice(i, 1); if (this.queue.length) return this.goTo(Math.min(i, this.queue.length - 1), 0); return; }
     ensureAudio();
-    if (AC.state !== 'running') await AC.resume();
-    try { await this.audio.play(); } catch {}
-  }
-  pause() { this.audio.pause(); }
-  toggle() { if (this.audio.paused) this.play(); else this.pause(); }
-
-  onState() {
-    const playing = !!this.song && !this.audio.paused;
-    this.el.classList.toggle('playing', playing);
-    this.ui.play.innerHTML = playing ? ICON.pause : ICON.play;
-    if (playing) { lastDeck = this; setMediaSession(this); }
-    updateWakeLock();
-  }
-
-  onEnded() {
-    this.onState();
-    if (!$('#autoNext').checked || !this.queue) return;
-    const next = this.queue[this.qi + 1]; const s = next && songs.get(next);
-    if (s) this.load(s, this.queue, this.qi + 1, true);
-  }
-
-  sync() {
-    const o = decks[1 - this.idx];
-    if (this.synced) { this.audio.playbackRate = 1; this.synced = false; this.ui.sync.classList.remove('on'); this.showBpm(); return; }
-    if (!this.song || !o.song) return toast('Carga una canción en cada deck para sincronizar.');
-    if (!this.song.bpm || !o.song.bpm) return toast('Todavía no se detectó el BPM de las dos canciones.');
-    const target = o.song.bpm * o.audio.playbackRate;
-    const base = target / this.song.bpm;
-    const r = [base, base / 2, base * 2].sort((a, b) => Math.abs(Math.log(a)) - Math.abs(Math.log(b)))[0];
-    if (r < 0.8 || r > 1.25) return toast('Los tempos son muy distintos para sincronizar.');
-    this.audio.playbackRate = r; this.synced = true; this.ui.sync.classList.add('on'); this.showBpm();
-  }
-
-  setNoVoice(on, silent) {
-    this.noVoice = on; this.ui.novoz.classList.toggle('on', on);
-    if (!this.kar) return;
+    this.endFade();
+    const old = this.cur && !this.cur.audio.paused ? this.cur : null;
+    const nw = engines.find((e) => e !== this.cur) || engines[0];
+    if (!old && this.cur) this.cur.audio.pause();
+    this.idx = i;
+    nw.setSong(song);
+    const secs = old ? Math.max(0, Math.min(fade, (old.audio.duration - old.audio.currentTime) || fade, (song.dur || 99) / 3)) : 0;
     const t = AC.currentTime;
-    this.kar.dry.gain.setTargetAtTime(on ? 0 : 1, t, 0.04);
-    this.kar.wet.gain.setTargetAtTime(on ? 1 : 0, t, 0.04);
-    if (on && !silent) toast('«Sin voz» rápido: quita lo que está al centro. Funciona mejor en unas canciones que en otras.', 3500);
-  }
-
-  tick() {
-    const a = this.audio, d = a.duration;
-    this.ui.time.textContent = fmt(a.currentTime);
-    if (d && isFinite(d)) {
-      if (!this.seeking) this.ui.seek.value = (a.currentTime / d) * 1000;
-      this.el.classList.toggle('ending', !a.paused && d - a.currentTime < 10);
-    }
-  }
-}
-
-const decks = [new Deck('A', 0), new Deck('B', 1)];
-let lastDeck = decks[0];
-
-/* ---------------- Mezclador ---------------- */
-let xf = 0, mixRaf = 0;
-function applyXfade() {
-  const a = Math.cos((xf * Math.PI) / 2), b = Math.sin((xf * Math.PI) / 2);
-  if (decks[0].xf) { decks[0].xf.gain.setTargetAtTime(a, AC.currentTime, 0.01); decks[1].xf.gain.setTargetAtTime(b, AC.currentTime, 0.01); }
-  $('#mixBtn').textContent = xf < 0.5 ? 'Mezclar A → B' : 'Mezclar B → A';
-}
-function setXf(v) { xf = Math.max(0, Math.min(1, v)); $('#xfade').value = Math.round(xf * 1000); applyXfade(); }
-$('#xfade').oninput = (e) => { cancelAnimationFrame(mixRaf); setXf(e.target.value / 1000); };
-$('#master').oninput = (e) => { if (master) master.gain.value = e.target.value / 100; store.set('cem.master', +e.target.value); };
-$('#mixBtn').onclick = () => {
-  ensureAudio(); cancelAnimationFrame(mixRaf);
-  const to = xf < 0.5 ? 1 : 0, dTo = decks[to], dFrom = decks[1 - to];
-  if (!dTo.song) return toast('Carga una canción en el deck ' + dTo.k + ' primero.');
-  if (dTo.audio.paused) dTo.play();
-  const secs = +$('#mixSecs').value, t0 = performance.now(), x0 = xf;
-  const step = (now) => {
-    const k = Math.min(1, (now - t0) / (secs * 1000));
-    setXf(x0 + (to - x0) * k);
-    if (k < 1) mixRaf = requestAnimationFrame(step); else dFrom.pause();
-  };
-  mixRaf = requestAnimationFrame(step);
+    nw.xf.gain.cancelScheduledValues(t); nw.xf.gain.value = secs > 0.05 ? 0 : 1;
+    this.cur = nw;
+    if (AC.state !== 'running') { try { await AC.resume(); } catch {} }
+    nw.audio.currentTime = 0;
+    try { await nw.audio.play(); } catch {}
+    if (old && secs > 0.05) {
+      const N = 64, fin = new Float32Array(N), fout = new Float32Array(N);
+      for (let k = 0; k < N; k++) { const x = k / (N - 1); fin[k] = Math.sin(x * Math.PI / 2); fout[k] = Math.cos(x * Math.PI / 2); }
+      const t0 = AC.currentTime;
+      nw.xf.gain.setValueCurveAtTime(fin, t0, secs);
+      old.xf.gain.cancelScheduledValues(t0); old.xf.gain.setValueCurveAtTime(fout, t0, secs);
+      this.old = old; this.fading = true;
+      this.fadeTimer = setTimeout(() => { if (this.old === old) { old.audio.pause(); this.old = null; } this.fading = false; }, secs * 1000 + 150);
+    } else if (old) { old.audio.pause(); }
+    onSongChange();
+  },
+  seekFrac(f) { const a = this.cur && this.cur.audio; if (a && a.duration) a.currentTime = f * a.duration; },
+  insertNext(id) { if (this.idx < 0) return false; this.queue.splice(this.idx + 1, 0, id); return true; },
 };
-$('#autoLevel').onchange = (e) => { store.set('cem.autoLevel', e.target.checked); decks.forEach((d) => d.applyNorm()); };
-$('#autoNext').onchange = (e) => store.set('cem.autoNext', e.target.checked);
-$('#autoLevel').checked = store.get('cem.autoLevel', true);
-$('#autoNext').checked = store.get('cem.autoNext', true);
-$('#master').value = store.get('cem.master', 90);
+function shuffled(ids, first) {
+  const rest = ids.filter((x) => x !== first);
+  for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+  return first != null ? [first, ...rest] : rest;
+}
+function onEnded(e) { if (e === P.cur && !P.fading) P.next(true); }
 
-(function loop() { decks.forEach((d) => d.tick()); requestAnimationFrame(loop); })();
+// Revisa cada 250 ms (también con la pantalla apagada) si toca empezar la mezcla con la siguiente
+setInterval(() => {
+  const c = P.cur; if (!c || c.audio.paused || P.fading || S.xfade <= 0) return;
+  const d = c.audio.duration; if (!d || !isFinite(d)) return;
+  if (d - c.audio.currentTime <= S.xfade + 0.2 && d > S.xfade * 2.2 && P.nextIdx(true) >= 0) P.next(true);
+}, 250);
 
 /* ---------------- Pantalla encendida y controles del sistema ---------------- */
 let wake = null;
 async function updateWakeLock() {
-  const any = decks.some((d) => d.song && !d.audio.paused);
   try {
-    if (any && !wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
-    else if (!any && wake) { await wake.release(); wake = null; }
+    if (P.playing() && !wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
+    else if (!P.playing() && wake) { await wake.release(); wake = null; }
   } catch {}
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateWakeLock(); });
-function setMediaSession(d) {
-  if (!('mediaSession' in navigator) || !d.song) return;
+function setMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const s = P.song; if (!s) return;
   try {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: d.song.title, artist: d.song.artist || 'CEM DJ', artwork: [{ src: d.coverUrl || new URL('icon-512.png', location.href).href, sizes: '512x512' }] });
-    navigator.mediaSession.setActionHandler('play', () => lastDeck.play());
-    navigator.mediaSession.setActionHandler('pause', () => lastDeck.pause());
+    navigator.mediaSession.metadata = new MediaMetadata({ title: s.title, artist: s.artist || 'CEM DJ', artwork: [{ src: new URL(artUrl(s), location.href).href, sizes: '512x512' }] });
+    navigator.mediaSession.setActionHandler('play', () => { if (P.cur.audio.paused) P.toggle(); });
+    navigator.mediaSession.setActionHandler('pause', () => { if (!P.cur.audio.paused) P.toggle(); });
+    navigator.mediaSession.setActionHandler('previoustrack', () => P.prev());
+    navigator.mediaSession.setActionHandler('nexttrack', () => P.next(false));
+    navigator.mediaSession.setActionHandler('seekto', (d) => { if (d.seekTime != null) P.cur.audio.currentTime = d.seekTime; });
   } catch {}
 }
 
-/* ---------------- Análisis (duración, volumen, BPM) ---------------- */
+/* ---------------- Análisis (duración y volumen) ---------------- */
 function probeDuration(blob) {
   return new Promise((res) => {
     const a = new Audio(), u = URL.createObjectURL(blob);
@@ -369,45 +325,45 @@ async function pumpAnalysis() {
     try { await analyzeSong(s); } catch {}
     s.analyzed = true;
     DB.put(dbRecord(s)).catch(() => {});
-    decks.forEach((d) => { if (d.song === s) { d.applyNorm(); d.showBpm(); d.ui.dur.textContent = fmt(s.dur || d.audio.duration); } });
-    renderLib();
+    engines.forEach((e) => { if (e.song === s) e.applyNorm(); });
+    renderAll();
     await new Promise((r) => setTimeout(r, 30));
   }
   analyzing = false;
 }
 async function analyzeSong(s) {
   if (!s.dur) s.dur = await probeDuration(s.blob);
-  if (!s.dur || s.dur > 20 * 60) return; // muy largas: se reproducen sin analizar
+  if (!s.dur || s.dur > 20 * 60) return; // muy largas: se reproducen sin nivelar
   const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const ctx = new Off(1, 1, 22050); // 22 kHz: gasta menos memoria y alcanza para volumen y ritmo
+  const ctx = new Off(1, 1, 22050); // 22 kHz: gasta menos memoria y alcanza para medir el volumen
   const buf = await ctx.decodeAudioData(await s.blob.arrayBuffer());
   const m = measureLoudness(buf);
   if (m) { s.lufs = m.lufs; s.peak = m.peak; }
-  const on = computeOnset(buf);
-  const r = on ? bpmFromOnset(on) : null;
-  if (r && r.bpm > 0) s.bpm = r.bpm;
 }
-const dbRecord = (s) => ({ id: s.id, blob: s.blob, name: s.name, size: s.size, title: s.title, artist: s.artist, cover: s.cover || null, dur: s.dur || 0, bpm: s.bpm || 0, lufs: s.lufs ?? null, peak: s.peak || 0, analyzed: !!s.analyzed });
+const dbRecord = (s) => ({ id: s.id, blob: s.blob, name: s.name, size: s.size, title: s.title, artist: s.artist, cover: s.cover || null, dur: s.dur || 0, lufs: s.lufs ?? null, peak: s.peak || 0, analyzed: !!s.analyzed });
 
 /* ---------------- Agregar canciones ---------------- */
+const addTarget = () => (currentView === 'lists' && openList ? openList : null);
 $('#addBtn').onclick = () => $('#fileIn').click();
 $('#fileIn').onchange = async (e) => {
   const files = [...e.target.files]; e.target.value = '';
   if (!files.length) return;
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  const target = addTarget();
   let added = 0, dup = 0;
   for (const f of files) {
     if (f.type && !f.type.startsWith('audio/') && !/\.(mp3|m4a|aac|wav|flac|ogg|opus)$/i.test(f.name)) continue;
-    if ([...songs.values()].some((s) => s.name === f.name && s.size === f.size)) { dup++; continue; }
+    let s = [...songs.values()].find((x) => x.name === f.name && x.size === f.size);
+    if (s) { dup++; if (target) addToList(target, s.id, true); continue; }
     const tags = await readTags(f);
     const base = f.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
-    const s = { id: uid(), blob: f, name: f.name, size: f.size, title: tags.title || base, artist: tags.artist || '', cover: tags.cover || null, dur: 0, analyzed: false };
+    s = { id: uid(), blob: f, name: f.name, size: f.size, title: tags.title || base, artist: tags.artist || '', cover: tags.cover || null, dur: 0, analyzed: false };
     songs.set(s.id, s); added++;
     try { await DB.put(dbRecord(s)); } catch { toast('No hay espacio para guardar «' + s.title + '». Se podrá usar solo en esta sesión.', 4500); }
-    if (view !== 'all' && view) addToList(view, s.id, true);
+    if (target) addToList(target, s.id, true);
     analyzeSoon(s);
   }
-  renderLib();
+  renderAll();
   toast(added ? `${added} canción(es) agregada(s)` + (dup ? ` · ${dup} ya estaban` : '') : dup ? 'Esas canciones ya estaban agregadas.' : 'No se encontraron archivos de audio.');
 };
 
@@ -421,7 +377,7 @@ function openSheet({ title, text, input, buttons }) {
     const box = $('#sheetBtns'); box.innerHTML = '';
     let result = null;
     for (const b of buttons) {
-      const el = document.createElement('button'); el.className = 'btn' + (b.primary ? ' on' : ''); el.textContent = b.label;
+      const el = document.createElement('button'); el.className = 'pill' + (b.primary ? ' on' : ''); el.textContent = b.label;
       el.onclick = () => { result = { value: b.value, text: inp.value.trim() }; sheet.close(); };
       box.appendChild(el);
     }
@@ -449,103 +405,252 @@ async function chooseListFor(songId) {
   if (!r || r.value === '__no') return;
   let id = r.value;
   if (id === '__new') { const l = await askNewList(); if (!l) return; id = l.id; }
-  addToList(id, songId); renderLib();
+  addToList(id, songId); renderAll();
 }
-async function songMenu(s) {
-  const inList = view !== 'all' ? lists.find((l) => l.id === view) : null;
-  const buttons = [{ label: 'Agregar a una lista…', value: 'list', primary: true }];
-  if (inList) buttons.push({ label: 'Quitar de «' + inList.name + '»', value: 'rm' });
+async function songMenu(s, ctxList) {
+  const buttons = [{ label: 'Reproducir a continuación', value: 'next', primary: true }, { label: 'Agregar a una lista…', value: 'list' }];
+  if (ctxList) buttons.push({ label: 'Quitar de «' + ctxList.name + '»', value: 'rm' });
   buttons.push({ label: 'Eliminar de la biblioteca', value: 'del' }, { label: 'Cancelar', value: 'no' });
   const r = await openSheet({ title: s.title, text: s.artist || '', buttons });
   if (!r) return;
-  if (r.value === 'list') chooseListFor(s.id);
-  else if (r.value === 'rm') { inList.ids = inList.ids.filter((i) => i !== s.id); saveLists(); renderLib(); }
+  if (r.value === 'next') { if (P.insertNext(s.id)) toast('Sonará a continuación'); else P.start([s.id], 0); }
+  else if (r.value === 'list') chooseListFor(s.id);
+  else if (r.value === 'rm') { ctxList.ids = ctxList.ids.filter((i) => i !== s.id); saveLists(); renderAll(); }
   else if (r.value === 'del') {
     const c = await openSheet({ title: '¿Eliminar «' + s.title + '»?', text: 'Se borra de la biblioteca y de todas las listas, solo en este equipo. El archivo original no se toca.', buttons: [{ label: 'Eliminar', value: 'yes', primary: true }, { label: 'Cancelar', value: 'no' }] });
     if (c && c.value === 'yes') {
-      decks.forEach((d) => { if (d.song === s) { d.pause(); } });
+      if (P.song === s) P.stopAll();
+      P.queue = P.queue.filter((i) => i !== s.id);
       songs.delete(s.id); lists.forEach((l) => { l.ids = l.ids.filter((i) => i !== s.id); }); saveLists();
-      DB.del(s.id).catch(() => {}); renderLib();
+      if (arts.has(s.id)) { URL.revokeObjectURL(arts.get(s.id)); arts.delete(s.id); }
+      DB.del(s.id).catch(() => {}); renderAll();
     }
   }
 }
 
-/* ---------------- Pintar la biblioteca ---------------- */
+/* ---------------- Pintar pantallas ---------------- */
 const norm = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-function currentSongs() {
-  const q = norm($('#search').value.trim());
-  let arr;
-  if (view === 'all') arr = [...songs.values()].sort((a, b) => a.title.localeCompare(b.title, 'es'));
-  else { const l = lists.find((x) => x.id === view); arr = l ? l.ids.map((i) => songs.get(i)).filter(Boolean) : []; }
-  return q ? arr.filter((s) => norm(s.title + ' ' + s.artist).includes(q)) : arr;
-}
-function renderLib() {
-  if (view !== 'all' && !lists.some((l) => l.id === view)) view = 'all';
-  const chips = $('#chips'); chips.innerHTML = '';
-  const mk = (label, id) => { const c = document.createElement('button'); c.className = 'chip' + (view === id ? ' on' : ''); c.textContent = label; c.onclick = () => { view = id; renderLib(); }; chips.appendChild(c); };
-  mk('Todas', 'all'); lists.forEach((l) => mk(l.name + ' (' + l.ids.filter((i) => songs.has(i)).length + ')', l.id));
-  const nl = document.createElement('button'); nl.className = 'chip'; nl.textContent = '＋ Lista'; nl.onclick = async () => { const l = await askNewList(); if (l) { view = l.id; renderLib(); } }; chips.appendChild(nl);
+let currentView = 'songs';
 
-  const list = lists.find((l) => l.id === view);
-  $('#libTitle').textContent = list ? list.name : 'Biblioteca';
-  const arr = currentSongs(), rows = $('#rows'); rows.innerHTML = '';
-  if (!arr.length) {
-    rows.innerHTML = `<div class="empty">${songs.size ? (list && !$('#search').value ? 'Esta lista está vacía. Toca ⋯ en una canción de «Todas» para agregarla.' : 'No hay resultados.') : 'Toca «Agregar canciones» para elegir la música de este equipo.'}</div>`;
-  }
-  arr.forEach((s, i) => {
-    const row = document.createElement('div'); row.className = 'row-s' + (decks.some((d) => d.song === s) ? ' cur' : '');
-    const sub = [fmt(s.dur), s.bpm ? Math.round(s.bpm) + ' BPM' : (s.analyzed ? '' : 'analizando…'), s.artist].filter(Boolean).join(' · ');
-    row.innerHTML = `<div class="tx"><div class="nm"></div><div class="sub"></div></div>
-      <button class="btn" data-a="A">A</button><button class="btn" data-a="B">B</button>
-      ${list ? '<button class="btn" data-a="up" aria-label="Subir">▲</button><button class="btn" data-a="dn" aria-label="Bajar">▼</button>' : ''}
-      <button class="btn" data-a="more" aria-label="Más opciones">${ICON.more}</button>`;
-    row.querySelector('.nm').textContent = s.title; row.querySelector('.sub').textContent = sub;
-    row.querySelector('.tx').onclick = () => { const d = decks.find((x) => !x.song) || decks.find((x) => x.audio.paused) || decks[0]; loadFromView(d, s, arr); };
-    row.querySelectorAll('[data-a]').forEach((b) => {
-      b.onclick = (e) => {
-        e.stopPropagation(); const a = b.dataset.a;
-        if (a === 'A' || a === 'B') loadFromView(decks[a === 'A' ? 0 : 1], s, arr);
-        else if (a === 'more') songMenu(s);
-        else if (list && !$('#search').value) { const j = list.ids.indexOf(s.id), k = a === 'up' ? j - 1 : j + 1; if (k >= 0 && k < list.ids.length) { [list.ids[j], list.ids[k]] = [list.ids[k], list.ids[j]]; saveLists(); renderLib(); } }
-      };
-    });
-    rows.appendChild(row);
-  });
-  const total = [...songs.values()].reduce((n, s) => n + s.size, 0);
-  $('#libNote').textContent = songs.size ? `${songs.size} canciones guardadas en este equipo · ${(total / 1048576).toFixed(0)} MB` : '';
-  if (list && $('#search').value) $('#libNote').textContent += ' · (para reordenar, borra la búsqueda)';
+function songRow(s, ids, list) {
+  const row = document.createElement('div'); row.className = 'row'; row.dataset.id = s.id;
+  row.innerHTML = `<img class="th" alt="" loading="lazy"><div class="tx"><div class="nm"></div><div class="sub"></div></div><div class="du"></div>
+    ${list ? '<button class="ibtn" data-a="up" aria-label="Subir">▲</button><button class="ibtn" data-a="dn" aria-label="Bajar">▼</button>' : ''}
+    <button class="ibtn" data-a="more" aria-label="Más opciones">${ICON.more}</button>`;
+  row.querySelector('.th').src = artUrl(s);
+  row.querySelector('.nm').textContent = s.title; row.querySelector('.sub').textContent = s.artist || 'Artista desconocido';
+  row.querySelector('.du').textContent = s.dur ? fmt(s.dur) : '';
+  row.onclick = (e) => {
+    const b = e.target.closest('[data-a]');
+    if (!b) return P.start(ids, ids.indexOf(s.id));
+    const a = b.dataset.a;
+    if (a === 'more') songMenu(s, list);
+    else if (list) { const j = list.ids.indexOf(s.id), k = a === 'up' ? j - 1 : j + 1; if (k >= 0 && k < list.ids.length) { [list.ids[j], list.ids[k]] = [list.ids[k], list.ids[j]]; saveLists(); renderLists(); } }
+  };
+  return row;
 }
-function loadFromView(deck, s, arr) {
-  const inList = view !== 'all';
-  const ids = arr.map((x) => x.id);
-  if (deck.song && !deck.audio.paused) {
-    openSheet({ title: 'El deck ' + deck.k + ' está sonando', text: '¿Cambiar «' + deck.song.title + '» por «' + s.title + '»?', buttons: [{ label: 'Sí, cambiar', value: 'y', primary: true }, { label: 'Cancelar', value: 'n' }] })
-      .then((r) => { if (r && r.value === 'y') deck.load(s, inList ? ids : null, ids.indexOf(s.id), false); });
+function playIds(ids, shuffle) {
+  if (!ids.length) return;
+  const was = S.shuffle; S.shuffle = shuffle;
+  P.start(ids, shuffle ? Math.floor(Math.random() * ids.length) : 0);
+  syncModes();
+  if (!shuffle) { S.shuffle = was; syncModes(); }
+}
+function renderSongs() {
+  const q = norm($('#search').value.trim());
+  let arr = [...songs.values()].sort((a, b) => a.title.localeCompare(b.title, 'es'));
+  if (q) arr = arr.filter((s) => norm(s.title + ' ' + s.artist).includes(q));
+  const box = $('#songList'); box.innerHTML = '';
+  $('#songActions').hidden = !arr.length;
+  if (!arr.length) {
+    box.innerHTML = songs.size ? '<div class="empty">No hay resultados.</div>' : '<div class="empty">Aquí aparecerá la música de este equipo.<br><button class="pill on" id="emptyAdd">Agregar canciones</button></div>';
+    const b = $('#emptyAdd'); if (b) b.onclick = () => $('#fileIn').click();
+  }
+  const ids = arr.map((s) => s.id);
+  arr.forEach((s) => box.appendChild(songRow(s, ids, null)));
+  $('#libNote').textContent = songs.size ? `${songs.size} canciones guardadas en este equipo` : '';
+  $('#playAll').onclick = () => playIds(ids, false);
+  $('#shuffleAll').onclick = () => playIds(ids, true);
+}
+function renderLists() {
+  if (openList && !lists.some((l) => l.id === openList)) openList = null;
+  $('#listsHome').hidden = !!openList; $('#listDetail').hidden = !openList;
+  if (!openList) {
+    const box = $('#listCards'); box.innerHTML = '';
+    if (!lists.length) box.innerHTML = '<div class="empty">Todavía no hay listas. Crea una para ordenar la música del culto.</div>';
+    lists.forEach((l) => {
+      const n = l.ids.filter((i) => songs.has(i)).length;
+      const first = songs.get(l.ids.find((i) => songs.has(i)));
+      const b = document.createElement('button'); b.className = 'card-row';
+      b.innerHTML = '<img class="th" alt=""><div class="tx"><div class="nm"></div><div class="sub"></div></div>';
+      b.querySelector('.th').src = artUrl(first); b.querySelector('.nm').textContent = l.name; b.querySelector('.sub').textContent = n + (n === 1 ? ' canción' : ' canciones');
+      b.onclick = () => { openList = l.id; renderLists(); window.scrollTo(0, 0); };
+      box.appendChild(b);
+    });
     return;
   }
-  deck.load(s, inList ? ids : null, ids.indexOf(s.id), false);
+  const l = lists.find((x) => x.id === openList);
+  $('#listName').textContent = l.name;
+  const arr = l.ids.map((i) => songs.get(i)).filter(Boolean), ids = arr.map((s) => s.id);
+  const box = $('#listSongs'); box.innerHTML = '';
+  if (!arr.length) box.innerHTML = '<div class="empty">Esta lista está vacía.<br>Toca ⋯ en una canción de «Canciones» para agregarla, o usa ＋ arriba para elegir archivos nuevos.</div>';
+  arr.forEach((s) => box.appendChild(songRow(s, ids, l)));
+  $('#listPlay').onclick = () => playIds(ids, false);
+  $('#listShuffle').onclick = () => playIds(ids, true);
+  $('#listMore').onclick = async () => {
+    const r = await openSheet({ title: l.name, buttons: [{ label: 'Cambiar nombre', value: 'ren', primary: true }, { label: 'Eliminar lista', value: 'del' }, { label: 'Cancelar', value: 'no' }] });
+    if (!r) return;
+    if (r.value === 'ren') {
+      const n = await openSheet({ title: 'Nuevo nombre', input: l.name, buttons: [{ label: 'Guardar', value: 'ok', primary: true }, { label: 'Cancelar', value: 'no' }] });
+      if (n && n.value === 'ok' && n.text) { l.name = n.text.slice(0, 40); saveLists(); renderLists(); }
+    } else if (r.value === 'del') {
+      const c = await openSheet({ title: '¿Eliminar la lista «' + l.name + '»?', text: 'Las canciones no se borran de la biblioteca.', buttons: [{ label: 'Eliminar lista', value: 'yes', primary: true }, { label: 'Cancelar', value: 'no' }] });
+      if (c && c.value === 'yes') { lists = lists.filter((x) => x.id !== l.id); saveLists(); openList = null; renderLists(); }
+    }
+  };
+  markCurrent();
 }
-$('#search').oninput = renderLib;
+function markCurrent() {
+  const id = P.song && P.song.id;
+  $$('.row[data-id]').forEach((r) => r.classList.toggle('cur', r.dataset.id === id));
+}
+function renderSettings() {
+  const total = [...songs.values()].reduce((n, s) => n + s.size, 0);
+  $('#storeNote').textContent = songs.size ? `${songs.size} canciones · ${(total / 1048576).toFixed(0)} MB guardados en este equipo` : '';
+}
+function renderAll() { renderSongs(); renderLists(); renderSettings(); markCurrent(); }
+$('#search').oninput = renderSongs;
+$('#newList').onclick = async () => { const l = await askNewList(); if (l) { openList = l.id; renderLists(); } };
+$('#listBack').onclick = () => { openList = null; renderLists(); };
+
+/* ---------------- Navegación ---------------- */
+function showView(v) {
+  currentView = v;
+  $$('.view').forEach((x) => { x.hidden = x.id !== 'v-' + v; });
+  $$('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+  $('#addBtn').hidden = v === 'settings';
+  window.scrollTo(0, 0);
+}
+$$('#tabs button').forEach((b) => { b.onclick = () => { if (b.dataset.v === 'lists' && currentView === 'lists') { openList = null; renderLists(); } showView(b.dataset.v); }; });
+
+/* ---------------- Mini reproductor y "Reproduciendo" ---------------- */
+const np = $('#np');
+function openNp() { if (!P.song) return; np.classList.add('open'); np.setAttribute('aria-hidden', 'false'); try { history.pushState({ np: 1 }, ''); } catch {} }
+function closeNp(fromPop) { if (!np.classList.contains('open')) return; np.classList.remove('open'); np.setAttribute('aria-hidden', 'true'); if (!fromPop) { try { if (history.state && history.state.np) history.back(); } catch {} } }
+window.addEventListener('popstate', () => closeNp(true));
+$('#miniMain').onclick = openNp;
+$('#npClose').onclick = () => closeNp();
+$('#miniPlay').onclick = () => P.toggle();
+$('#miniNext').onclick = () => P.next(false);
+$('#npPlay').onclick = () => P.toggle();
+$('#npNext').onclick = () => P.next(false);
+$('#npPrev').onclick = () => P.prev();
+$('#npMore').onclick = () => { if (P.song) songMenu(P.song, null); };
+
+function onPlayState() {
+  const playing = P.playing();
+  $('#miniPlay').innerHTML = playing ? ICON.pause : ICON.play;
+  $('#npPlay').innerHTML = playing ? ICON.pause : ICON.play;
+  if (playing) setMediaSession();
+  updateWakeLock();
+}
+function onSongChange() {
+  const s = P.song;
+  $('#mini').hidden = !s;
+  if (!s) return;
+  $('#miniTitle').textContent = s.title; $('#miniArtist').textContent = s.artist || 'Artista desconocido';
+  $('#miniArt').src = artUrl(s); $('#npArt').src = artUrl(s);
+  $('#npTitle').textContent = s.title; $('#npArtist').textContent = s.artist || 'Artista desconocido';
+  $('#npDur').textContent = fmt(s.dur || (P.cur && P.cur.audio.duration));
+  markCurrent(); onPlayState(); setMediaSession();
+  if (!s.analyzed) analyzeSoon(s);
+}
+let seeking = false;
+const seek = $('#npSeek');
+seek.addEventListener('pointerdown', () => { seeking = true; });
+seek.addEventListener('pointerup', () => { seeking = false; });
+seek.addEventListener('change', () => { seeking = false; });
+seek.oninput = () => P.seekFrac(seek.value / 1000);
+(function loop() {
+  const a = P.cur && P.cur.audio;
+  if (a && P.song) {
+    const d = a.duration;
+    if (d && isFinite(d)) {
+      if (!seeking) seek.value = (a.currentTime / d) * 1000;
+      $('#miniProg').style.width = (a.currentTime / d) * 100 + '%';
+      $('#npDur').textContent = fmt(d);
+    }
+    $('#npTime').textContent = fmt(a.currentTime);
+  }
+  requestAnimationFrame(loop);
+})();
+
+/* ---------------- Aleatorio, repetir, voz, mezcla, EQ ---------------- */
+function syncModes() {
+  $('#npShuffle').classList.toggle('on', S.shuffle);
+  $('#npRepeat').classList.toggle('on', S.repeat !== 'off');
+  $('#npRepeat').innerHTML = ICON.repeat + (S.repeat === 'one' ? '<span class="one">1</span>' : '');
+  $('#npVoice').classList.toggle('on', S.novoice);
+  $('#npMix').textContent = S.xfade > 0 ? 'Mezcla: ' + S.xfade + ' s' : 'Mezcla: no';
+  $('#npMix').classList.toggle('on', S.xfade > 0);
+  $('#xfadeSel').value = String(S.xfade);
+  $('#levelChk').checked = S.level; $('#novoiceChk').checked = S.novoice;
+  $$('[data-band]').forEach((r) => { r.value = S.eq[r.dataset.band]; });
+  $('#vol').value = S.vol;
+  saveS();
+}
+$('#npShuffle').onclick = () => {
+  S.shuffle = !S.shuffle;
+  if (P.queue.length) { const cur = P.queue[P.idx]; if (S.shuffle) { P.queue = shuffled(P.base, cur); P.idx = 0; } else { P.queue = P.base.slice(); P.idx = Math.max(0, P.queue.indexOf(cur)); } }
+  syncModes(); toast(S.shuffle ? 'Aleatorio activado' : 'Aleatorio desactivado', 1500);
+};
+$('#npRepeat').onclick = () => { S.repeat = S.repeat === 'off' ? 'all' : S.repeat === 'all' ? 'one' : 'off'; syncModes(); toast(S.repeat === 'off' ? 'Sin repetir' : S.repeat === 'all' ? 'Repetir toda la lista' : 'Repetir esta canción', 1500); };
+function setNoVoice(on, notify) { S.novoice = on; engines.forEach((e) => e.applyFx()); syncModes(); if (on && notify) toast('«Sin voz» rápido: quita lo que está al centro. Funciona mejor en unas canciones que en otras.', 3800); }
+$('#npVoice').onclick = () => setNoVoice(!S.novoice, true);
+$('#novoiceChk').onchange = (e) => setNoVoice(e.target.checked, true);
+$('#npMix').onclick = () => { const o = [0, 3, 6, 10, 15]; S.xfade = o[(o.indexOf(S.xfade) + 1) % o.length]; syncModes(); };
+$('#xfadeSel').onchange = (e) => { S.xfade = +e.target.value; syncModes(); };
+$('#levelChk').onchange = (e) => { S.level = e.target.checked; engines.forEach((x) => x.applyNorm()); syncModes(); };
+$('#npEq').onclick = (e) => { const b = $('#npEqBox'); b.hidden = !b.hidden; e.currentTarget.classList.toggle('on', !b.hidden); };
+$$('[data-band]').forEach((r) => {
+  r.oninput = () => { S.eq[r.dataset.band] = +r.value; engines.forEach((e) => e.applyFx()); $$(`[data-band="${r.dataset.band}"]`).forEach((o) => { o.value = r.value; }); saveS(); };
+  r.ondblclick = () => { r.value = 0; r.oninput(); };
+});
+$('#vol').oninput = (e) => { S.vol = +e.target.value; if (master) master.gain.value = S.vol / 100; saveS(); };
 
 /* ---------------- Tema, instalación y arranque ---------------- */
-function paintTheme() { $('#themeBtn').innerHTML = document.documentElement.dataset.theme === 'dark' ? ICON.sun : ICON.moon; }
-$('#themeBtn').onclick = () => {
-  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = t; try { localStorage.setItem('cem.theme', t); } catch {} paintTheme();
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('cem.theme', t); } catch {}
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#1a1710' : '#f8f1de';
-};
-paintTheme();
-
+  $('#darkChk').checked = t === 'dark';
+}
+$('#darkChk').onchange = (e) => applyTheme(e.target.checked ? 'dark' : 'light');
 let installEvt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#installBtn').hidden = false; });
 $('#installBtn').onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; $('#installBtn').hidden = true; };
 window.addEventListener('appinstalled', () => { $('#installBtn').hidden = true; });
 
+function paintIcons() {
+  $('#addBtn').innerHTML = ICON.plus;
+  $('#playAll').innerHTML = ICON.play + ' Reproducir'; $('#shuffleAll').innerHTML = ICON.shuffle + ' Aleatorio';
+  $('#newList').innerHTML = ICON.plus + ' Nueva lista';
+  $('#listBack').innerHTML = ICON.back;
+  $('#listPlay').innerHTML = ICON.play + ' Reproducir'; $('#listShuffle').innerHTML = ICON.shuffle + ' Aleatorio'; $('#listMore').innerHTML = ICON.more;
+  $('#miniPlay').innerHTML = ICON.play; $('#miniNext').innerHTML = ICON.next;
+  $$('#tabs button').forEach((b) => { b.querySelector('span').innerHTML = ICON[b.dataset.v]; });
+  $('#npClose').innerHTML = ICON.down; $('#npMore').innerHTML = ICON.more;
+  $('#npShuffle').innerHTML = ICON.shuffle; $('#npPrev').innerHTML = ICON.prev; $('#npPlay').innerHTML = ICON.play; $('#npNext').innerHTML = ICON.next;
+  $('#volIcon').innerHTML = ICON.vol;
+  $('#npArt').src = ICON.logo; $('#miniArt').src = ICON.logo;
+}
+
 (async function start() {
+  paintIcons(); applyTheme(document.documentElement.dataset.theme); syncModes();
   try {
-    for (const r of await DB.all()) songs.set(r.id, { ...r, bpm: r.bpm || 0 });
+    for (const r of await DB.all()) songs.set(r.id, r);
   } catch { toast('Este navegador no permite guardar canciones; solo funcionarán durante esta sesión.', 5000); }
-  renderLib();
+  renderAll();
   songs.forEach((s) => { if (!s.analyzed) analyzeSoon(s); });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

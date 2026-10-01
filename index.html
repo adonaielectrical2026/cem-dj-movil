@@ -24,52 +24,113 @@
 <header class="top">
   <img src="logo.jpg" alt="">
   <div class="brand">CENTRO EVANGÉLICO MUNDIAL - SALTO</div>
-  <button class="ibtn" id="installBtn" hidden>Instalar</button>
-  <button class="ibtn" id="themeBtn" aria-label="Cambiar entre modo claro y oscuro">
-    <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
-  </button>
+  <button class="ibtn" id="addBtn" aria-label="Agregar canciones"></button>
 </header>
 
-<main>
-  <section class="decks">
-    <article class="card deck" id="deckA"></article>
-    <article class="card deck" id="deckB"></article>
-  </section>
-
-  <section class="card mixer">
-    <div class="xf"><span>A</span><input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfader"><span>B</span></div>
-    <div class="row">
-      <button class="btn on grow" id="mixBtn">Mezclar A → B</button>
-      <label>Duración
-        <select id="mixSecs"><option value="3">3 s</option><option value="6">6 s</option><option value="8" selected>8 s</option><option value="12">12 s</option><option value="20">20 s</option></select>
-      </label>
+<main id="main">
+  <!-- Canciones -->
+  <section class="view" id="v-songs">
+    <h1>Canciones</h1>
+    <input type="search" class="search" id="search" placeholder="Buscar canción o artista" autocomplete="off">
+    <div class="actions" id="songActions">
+      <button class="pill on" id="playAll"></button>
+      <button class="pill" id="shuffleAll"></button>
     </div>
-    <div class="row">
-      <label class="grow">Volumen general <input type="range" id="master" min="0" max="100" value="90" style="min-width:120px"></label>
-    </div>
-    <div class="row">
-      <label><input type="checkbox" id="autoLevel" checked> Nivelar volumen entre canciones</label>
-      <label><input type="checkbox" id="autoNext" checked> Seguir la lista</label>
-    </div>
-  </section>
-
-  <section class="card lib">
-    <div class="lib-head">
-      <h2 id="libTitle">Biblioteca</h2>
-      <button class="btn on" id="addBtn"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>Agregar canciones</button>
-    </div>
-    <input type="file" id="fileIn" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
-    <input type="search" class="search" id="search" placeholder="Buscar canción…" autocomplete="off">
-    <div class="chips" id="chips"></div>
-    <div class="rows" id="rows"></div>
+    <div id="songList"></div>
     <div class="note" id="libNote"></div>
+  </section>
+
+  <!-- Listas -->
+  <section class="view" id="v-lists" hidden>
+    <div id="listsHome">
+      <h1>Listas</h1>
+      <button class="pill on" id="newList"></button>
+      <div id="listCards"></div>
+    </div>
+    <div id="listDetail" hidden>
+      <div class="detail-head"><button class="ibtn" id="listBack" aria-label="Volver"></button><h1 id="listName"></h1></div>
+      <div class="actions">
+        <button class="pill on" id="listPlay"></button>
+        <button class="pill" id="listShuffle"></button>
+        <button class="pill" id="listMore"></button>
+      </div>
+      <div id="listSongs"></div>
+    </div>
+  </section>
+
+  <!-- Ajustes -->
+  <section class="view" id="v-settings" hidden>
+    <h1>Ajustes</h1>
+    <div class="group">
+      <div class="set"><div class="tx"><b>Mezcla entre canciones</b><small>La canción siguiente entra mientras termina la anterior.</small></div>
+        <select id="xfadeSel"><option value="0">Sin mezcla</option><option value="3">3 s</option><option value="6">6 s</option><option value="10">10 s</option><option value="15">15 s</option></select></div>
+      <label class="set"><div class="tx"><b>Nivelar volumen</b><small>Iguala el volumen entre canciones.</small></div><input type="checkbox" id="levelChk" class="sw"></label>
+      <label class="set"><div class="tx"><b>Sin voz (rápido)</b><small>Quita lo que está al centro. Funciona mejor en unas canciones que en otras.</small></div><input type="checkbox" id="novoiceChk" class="sw"></label>
+    </div>
+    <h2>Ecualizador</h2>
+    <div class="group eqbox">
+      <label>Graves<input type="range" min="-12" max="12" step="0.5" value="0" data-band="low"></label>
+      <label>Medios<input type="range" min="-12" max="12" step="0.5" value="0" data-band="mid"></label>
+      <label>Agudos<input type="range" min="-12" max="12" step="0.5" value="0" data-band="high"></label>
+    </div>
+    <h2>Apariencia</h2>
+    <div class="group">
+      <label class="set"><div class="tx"><b>Modo oscuro</b></div><input type="checkbox" id="darkChk" class="sw"></label>
+      <button class="set" id="installBtn" hidden><div class="tx"><b>Instalar en la pantalla de inicio</b></div></button>
+    </div>
+    <div class="note" id="storeNote"></div>
   </section>
 </main>
 
+<!-- Mini reproductor -->
+<div class="mini" id="mini" hidden>
+  <div class="mini-main" id="miniMain"><img id="miniArt" alt=""><div class="tx"><div class="t" id="miniTitle"></div><div class="a" id="miniArtist"></div></div></div>
+  <button class="ibtn" id="miniPlay"></button>
+  <button class="ibtn" id="miniNext"></button>
+  <div class="mini-bar"><i id="miniProg"></i></div>
+</div>
+
+<nav class="tabs" id="tabs">
+  <button data-v="songs" class="on"><span></span>Canciones</button>
+  <button data-v="lists"><span></span>Listas</button>
+  <button data-v="settings"><span></span>Ajustes</button>
+</nav>
+
+<!-- Reproduciendo -->
+<div class="np" id="np" aria-hidden="true">
+  <div class="np-top"><button class="ibtn" id="npClose" aria-label="Cerrar"></button><div class="np-h">Reproduciendo</div><button class="ibtn" id="npMore" aria-label="Más opciones"></button></div>
+  <div class="np-body">
+    <div class="np-art"><img id="npArt" alt=""></div>
+    <div class="np-ctl">
+      <div class="np-info"><div class="np-title" id="npTitle"></div><div class="np-artist" id="npArtist"></div></div>
+      <input type="range" id="npSeek" min="0" max="1000" value="0" aria-label="Posición">
+      <div class="np-times"><span id="npTime">0:00</span><span id="npDur">–:––</span></div>
+      <div class="np-btns">
+        <button class="ibtn" id="npShuffle" aria-label="Aleatorio"></button>
+        <button class="ibtn big2" id="npPrev" aria-label="Anterior"></button>
+        <button class="ibtn play" id="npPlay" aria-label="Reproducir o pausar"></button>
+        <button class="ibtn big2" id="npNext" aria-label="Siguiente"></button>
+        <button class="ibtn" id="npRepeat" aria-label="Repetir"></button>
+      </div>
+      <div class="np-row">
+        <button class="pill" id="npVoice">Sin voz</button>
+        <button class="pill" id="npMix">Mezcla</button>
+        <button class="pill" id="npEq">EQ</button>
+      </div>
+      <div class="np-eq" id="npEqBox" hidden>
+        <label>Graves<input type="range" min="-12" max="12" step="0.5" value="0" data-band="low"></label>
+        <label>Medios<input type="range" min="-12" max="12" step="0.5" value="0" data-band="mid"></label>
+        <label>Agudos<input type="range" min="-12" max="12" step="0.5" value="0" data-band="high"></label>
+      </div>
+      <div class="np-vol"><span id="volIcon"></span><input type="range" id="vol" min="0" max="100" value="90" aria-label="Volumen"></div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileIn" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
 <dialog id="sheet"><h3 id="sheetTitle"></h3><p id="sheetText" hidden></p><input type="text" id="sheetInput" hidden><div class="col" id="sheetBtns"></div></dialog>
 <div class="toast" id="toast"></div>
 
-<script src="bpm.js"></script>
 <script src="lufs.js"></script>
 <script src="app.js"></script>
 </body>
