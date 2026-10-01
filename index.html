@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f8f1de">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="CEM DJ">
+<title>CEM DJ</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<script>
+  (function () {
+    var t = 'light';
+    try { t = localStorage.getItem('cem.theme') || 'light'; } catch (e) {}
+    document.documentElement.dataset.theme = t === 'dark' ? 'dark' : 'light';
+  })();
+</script>
+</head>
+<body>
+<header class="top">
+  <img src="logo.jpg" alt="">
+  <div class="brand">CENTRO EVANGÉLICO MUNDIAL - SALTO</div>
+  <button class="ibtn" id="installBtn" hidden>Instalar</button>
+  <button class="ibtn" id="themeBtn" aria-label="Cambiar entre modo claro y oscuro">
+    <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+  </button>
+</header>
+
+<main>
+  <section class="decks">
+    <article class="card deck" id="deckA"></article>
+    <article class="card deck" id="deckB"></article>
+  </section>
+
+  <section class="card mixer">
+    <div class="xf"><span>A</span><input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfader"><span>B</span></div>
+    <div class="row">
+      <button class="btn on grow" id="mixBtn">Mezclar A → B</button>
+      <label>Duración
+        <select id="mixSecs"><option value="3">3 s</option><option value="6">6 s</option><option value="8" selected>8 s</option><option value="12">12 s</option><option value="20">20 s</option></select>
+      </label>
+    </div>
+    <div class="row">
+      <label class="grow">Volumen general <input type="range" id="master" min="0" max="100" value="90" style="min-width:120px"></label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="autoLevel" checked> Nivelar volumen entre canciones</label>
+      <label><input type="checkbox" id="autoNext" checked> Seguir la lista</label>
+    </div>
+  </section>
+
+  <section class="card lib">
+    <div class="lib-head">
+      <h2 id="libTitle">Biblioteca</h2>
+      <button class="btn on" id="addBtn"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>Agregar canciones</button>
+    </div>
+    <input type="file" id="fileIn" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
+    <input type="search" class="search" id="search" placeholder="Buscar canción…" autocomplete="off">
+    <div class="chips" id="chips"></div>
+    <div class="rows" id="rows"></div>
+    <div class="note" id="libNote"></div>
+  </section>
+</main>
+
+<dialog id="sheet"><h3 id="sheetTitle"></h3><p id="sheetText" hidden></p><input type="text" id="sheetInput" hidden><div class="col" id="sheetBtns"></div></dialog>
+<div class="toast" id="toast"></div>
+
+<script src="bpm.js"></script>
+<script src="lufs.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
