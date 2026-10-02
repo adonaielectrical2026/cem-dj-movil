@@ -26,6 +26,8 @@ const ICON = {
   pause: svg('M6 5h4v14H6zM14 5h4v14h-4z'),
   plus: svg('M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z'),
   more: svg('M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'),
+  moon: svg('M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z'),
+  sun: svg('M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 1h2v3h-2zM11 20h2v3h-2zM1 11h3v2H1zM20 11h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zM16.3 17.7l1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zM16.3 6.3l2.1-2.1 1.4 1.4-2.1 2.1z'),
   settings: svg('M3 17v2h6v-2zM3 5v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z'),
 };
 
@@ -50,48 +52,155 @@ const DB = (() => {
   return { all: () => tx('readonly', (s) => s.getAll()), put: (o) => tx('readwrite', (s) => s.put(o)), del: (id) => tx('readwrite', (s) => s.delete(id)) };
 })();
 
-/* ---------------- Etiquetas ID3 (título, artista, carátula) ---------------- */
+/* ---------------- Etiquetas: título, artista y carátula del archivo ----------------
+   MP3 (ID3v2.2 / 2.3 / 2.4), M4A/AAC/ALAC (MP4), FLAC y OGG/Opus. */
+const td = (label, b) => { try { return new TextDecoder(label).decode(b); } catch { return ''; } };
+const imgType = (mime, data) => (/^image\/(png|jpe?g|webp|gif)$/i.test(mime) ? mime.toLowerCase().replace('jpg', 'jpeg') : data[0] === 0x89 ? 'image/png' : 'image/jpeg');
 async function readTags(blob) {
-  const out = {};
   try {
-    const head = new Uint8Array(await blob.slice(0, 10).arrayBuffer());
-    if (head[0] !== 0x49 || head[1] !== 0x44 || head[2] !== 0x33) return out;
-    const ver = head[3];
-    const size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
-    const buf = new Uint8Array(await blob.slice(10, 10 + Math.min(size, 8 * 1024 * 1024)).arrayBuffer());
-    const sync = (o) => (buf[o] << 21) | (buf[o + 1] << 14) | (buf[o + 2] << 7) | buf[o + 3];
-    const u32 = (o) => ((buf[o] << 24) | (buf[o + 1] << 16) | (buf[o + 2] << 8) | buf[o + 3]) >>> 0;
-    let p = 0;
-    if (head[5] & 0x40) p += ver === 4 ? sync(0) : u32(0) + 4;
-    while (p + 10 <= buf.length) {
-      const id = String.fromCharCode(buf[p], buf[p + 1], buf[p + 2], buf[p + 3]);
-      if (!/^[A-Z0-9]{4}$/.test(id)) break;
-      const fs = ver === 4 ? sync(p + 4) : u32(p + 4);
-      if (fs <= 0 || p + 10 + fs > buf.length) break;
-      const body = buf.subarray(p + 10, p + 10 + fs);
-      p += 10 + fs;
-      if (id === 'TIT2') out.title = id3Text(body);
-      else if (id === 'TPE1') out.artist = id3Text(body);
-      else if (id === 'APIC' && !out.cover) out.cover = id3Pic(body);
-    }
+    const h = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+    const s4 = (o) => String.fromCharCode(h[o], h[o + 1], h[o + 2], h[o + 3]);
+    if (h[0] === 0x49 && h[1] === 0x44 && h[2] === 0x33) return await readId3(blob, h);
+    if (s4(4) === 'ftyp') return await readMp4(blob);
+    if (s4(0) === 'fLaC') return await readFlac(blob);
+    if (s4(0) === 'OggS') return await readOgg(blob);
   } catch {}
+  return {};
+}
+
+// ---- MP3: ID3v2 ----
+const unsync = (b) => { const o = []; for (let i = 0; i < b.length; i++) { o.push(b[i]); if (b[i] === 0xff && b[i + 1] === 0x00) i++; } return new Uint8Array(o); };
+async function readId3(blob, head) {
+  const out = {}, ver = head[3], flags = head[5];
+  const size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9];
+  let buf = new Uint8Array(await blob.slice(10, 10 + Math.min(size, 16 * 1024 * 1024)).arrayBuffer());
+  if (ver < 4 && flags & 0x80) buf = unsync(buf); // desincronización de todo el tag (v2.2 / v2.3)
+  const sync = (o) => (buf[o] << 21) | (buf[o + 1] << 14) | (buf[o + 2] << 7) | buf[o + 3];
+  const u32 = (o) => ((buf[o] << 24) | (buf[o + 1] << 16) | (buf[o + 2] << 8) | buf[o + 3]) >>> 0;
+  const idLen = ver === 2 ? 3 : 4, hdLen = ver === 2 ? 6 : 10;
+  let p = 0;
+  if (ver > 2 && flags & 0x40) p += ver === 4 ? sync(0) : u32(0) + 4;
+  while (p + hdLen <= buf.length) {
+    const id = String.fromCharCode(...buf.subarray(p, p + idLen));
+    if (!/^[A-Z0-9]+$/.test(id) || id.length !== idLen) break;
+    const fs = ver === 2 ? (buf[p + 3] << 16) | (buf[p + 4] << 8) | buf[p + 5] : ver === 4 ? sync(p + 4) : u32(p + 4);
+    const ff = ver === 2 ? 0 : (buf[p + 8] << 8) | buf[p + 9];
+    if (fs <= 0 || p + hdLen + fs > buf.length) break;
+    let body = buf.subarray(p + hdLen, p + hdLen + fs);
+    p += hdLen + fs;
+    if (ver === 4) { if (ff & 0x0001) body = body.subarray(4); if (ff & 0x0002) body = unsync(body); }
+    if (ver === 3 && ff & 0x0080) continue; // comprimido (raro): se ignora
+    if (id === 'TIT2' || id === 'TT2') out.title = out.title || id3Text(body);
+    else if (id === 'TPE1' || id === 'TP1') out.artist = out.artist || id3Text(body);
+    else if ((id === 'APIC' || id === 'PIC') && !out.cover) out.cover = id3Pic(body, id === 'PIC');
+  }
   return out;
 }
 function id3Text(b) {
   const label = ['windows-1252', 'utf-16', 'utf-16be', 'utf-8'][b[0]] || 'utf-8';
-  return new TextDecoder(label).decode(b.subarray(1)).replace(/\0+$/g, '').replace(/\0/g, ' ').trim();
+  return td(label, b.subarray(1)).replace(/\0+$/g, '').replace(/\0/g, ' ').trim();
 }
-function id3Pic(b) {
+function id3Pic(b, v22) {
   const enc = b[0];
-  let i = 1; while (i < b.length && b[i] !== 0) i++;
-  const mime = String.fromCharCode(...b.subarray(1, i));
-  i += 2;
+  let i = 1, mime;
+  if (v22) { mime = 'image/' + String.fromCharCode(b[1], b[2], b[3]).toLowerCase(); i = 4; } // PIC: formato de 3 letras
+  else { while (i < b.length && b[i] !== 0) i++; mime = String.fromCharCode(...b.subarray(1, i)); i++; }
+  i++; // tipo de imagen
   if (enc === 0 || enc === 3) { while (i < b.length && b[i] !== 0) i++; i++; }
   else { while (i + 1 < b.length && !(b[i] === 0 && b[i + 1] === 0)) i += 2; i += 2; }
   const data = b.subarray(i);
   if (data.length < 100) return null;
-  const type = /^image\/(png|jpe?g|webp|gif)$/.test(mime) ? mime : data[0] === 0x89 ? 'image/png' : 'image/jpeg';
-  return new Blob([data], { type });
+  return new Blob([data], { type: imgType(mime, data) });
+}
+
+// ---- M4A / MP4: moov > udta > meta > ilst ----
+async function readMp4(blob) {
+  const out = {};
+  const hdr = async (pos) => {
+    const b = new Uint8Array(await blob.slice(pos, pos + 16).arrayBuffer());
+    if (b.length < 8) return null;
+    let size = ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0, hl = 8;
+    const type = String.fromCharCode(b[4], b[5], b[6], b[7]);
+    if (size === 1) { size = Number(new DataView(b.buffer).getBigUint64(8)); hl = 16; } else if (size === 0) size = blob.size - pos;
+    return { type, size, hl };
+  };
+  let pos = 0, moov = null;
+  while (pos + 8 <= blob.size) { const a = await hdr(pos); if (!a || a.size < 8) break; if (a.type === 'moov') { moov = a; break; } pos += a.size; }
+  if (!moov || moov.size > 64 * 1024 * 1024) return out;
+  const m = new Uint8Array(await blob.slice(pos + moov.hl, pos + moov.size).arrayBuffer());
+  const dv = new DataView(m.buffer);
+  const kids = (s, e) => { const r = []; while (s + 8 <= e) { const sz = dv.getUint32(s); const t = String.fromCharCode(m[s + 4], m[s + 5], m[s + 6], m[s + 7]); if (sz < 8 || s + sz > e) break; r.push({ t, s, e: s + sz }); s += sz; } return r; };
+  const find = (list, t) => list.find((x) => x.t === t);
+  const udta = find(kids(0, m.length), 'udta'); if (!udta) return out;
+  const meta = find(kids(udta.s + 8, udta.e), 'meta'); if (!meta) return out;
+  const ilst = find(kids(meta.s + 12, meta.e), 'ilst'); if (!ilst) return out;
+  for (const it of kids(ilst.s + 8, ilst.e)) {
+    const data = find(kids(it.s + 8, it.e), 'data'); if (!data) continue;
+    const kind = dv.getUint32(data.s + 8) & 0xffffff, val = m.subarray(data.s + 16, data.e);
+    if (it.t === '©nam') out.title = td('utf-8', val).trim();
+    else if (it.t === '©ART') out.artist = td('utf-8', val).trim();
+    else if (it.t === 'covr' && !out.cover && val.length > 100) out.cover = new Blob([val.slice()], { type: kind === 14 ? 'image/png' : imgType('', val) });
+  }
+  return out;
+}
+
+// ---- FLAC: bloques VORBIS_COMMENT y PICTURE ----
+function vorbisComments(b, out) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let p = 0; const vl = dv.getUint32(p, true); p += 4 + vl;
+  const n = dv.getUint32(p, true); p += 4;
+  for (let k = 0; k < n && p + 4 <= b.length; k++) {
+    const l = dv.getUint32(p, true); p += 4;
+    const c = td('utf-8', b.subarray(p, p + l)); p += l;
+    const eq = c.indexOf('='); if (eq < 0) continue;
+    const key = c.slice(0, eq).toUpperCase(), val = c.slice(eq + 1);
+    if (key === 'TITLE' && !out.title) out.title = val.trim();
+    else if (key === 'ARTIST' && !out.artist) out.artist = val.trim();
+    else if (key === 'METADATA_BLOCK_PICTURE' && !out.cover) { try { out.cover = flacPic(Uint8Array.from(atob(val.trim()), (ch) => ch.charCodeAt(0))); } catch {} }
+  }
+}
+function flacPic(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let p = 4; const ml = dv.getUint32(p); p += 4;
+  const mime = String.fromCharCode(...b.subarray(p, p + ml)); p += ml;
+  const dl = dv.getUint32(p); p += 4 + dl + 16;
+  const len = dv.getUint32(p); p += 4;
+  const data = b.subarray(p, p + len);
+  return data.length > 100 ? new Blob([data.slice()], { type: imgType(mime, data) }) : null;
+}
+async function readFlac(blob) {
+  const out = {};
+  let pos = 4;
+  for (let n = 0; n < 64 && pos + 4 <= blob.size; n++) {
+    const h = new Uint8Array(await blob.slice(pos, pos + 4).arrayBuffer());
+    const last = h[0] & 0x80, type = h[0] & 0x7f, len = (h[1] << 16) | (h[2] << 8) | h[3];
+    if (type === 4 || (type === 6 && !out.cover)) {
+      const b = new Uint8Array(await blob.slice(pos + 4, pos + 4 + len).arrayBuffer());
+      if (type === 4) vorbisComments(b, out); else out.cover = flacPic(b);
+    }
+    pos += 4 + len;
+    if (last) break;
+  }
+  return out;
+}
+
+// ---- OGG / Opus: se juntan las primeras páginas y se leen los comentarios ----
+async function readOgg(blob) {
+  const out = {};
+  const b = new Uint8Array(await blob.slice(0, Math.min(blob.size, 12 * 1024 * 1024)).arrayBuffer());
+  const parts = []; let p = 0, tot = 0;
+  while (p + 27 <= b.length && b[p] === 0x4f && b[p + 1] === 0x67 && b[p + 2] === 0x67 && b[p + 3] === 0x53) {
+    const segs = b[p + 26]; let len = 0;
+    for (let i = 0; i < segs; i++) len += b[p + 27 + i];
+    const s = p + 27 + segs; parts.push(b.subarray(s, s + len)); tot += len; p = s + len;
+    if (parts.length > 400) break;
+  }
+  const all = new Uint8Array(tot); let o = 0; for (const x of parts) { all.set(x, o); o += x.length; }
+  // el paquete de comentarios empieza con "\x03vorbis" (Vorbis) u "OpusTags" (Opus)
+  const find = (sig) => { outer: for (let i = 0; i + sig.length < all.length; i++) { for (let j = 0; j < sig.length; j++) if (all[i + j] !== sig.charCodeAt(j)) continue outer; return i + sig.length; } return -1; };
+  let start = find('OpusTags'); if (start < 0) start = find('\x03vorbis');
+  if (start >= 0) { try { vorbisComments(all.subarray(start), out); } catch {} }
+  return out;
 }
 
 /* ---------------- Ajustes ---------------- */
@@ -169,7 +278,6 @@ class Deck {
       </div>
       <div class="d-title">Elige una canción</div>
       <div class="d-artist"></div>
-      <canvas class="ov" aria-label="Posición en la canción del deck ${k}"></canvas>
       <div class="d-time"><span class="el">0:00</span><span class="du">–:––</span></div>
       <div class="d-btns">
         <button class="pill cue" aria-label="Punto de inicio (CUE) del deck ${k}">CUE</button>
@@ -178,14 +286,14 @@ class Deck {
       </div>
       <label class="d-pitch"><small>Tempo</small><input type="range" min="-${PITCH}" max="${PITCH}" step="0.1" value="0" aria-label="Tempo del deck ${k}"></label>`;
     const q = (s) => this.el.querySelector(s);
-    this.ui = { rem: q('.d-rem'), onair: q('.onair'), disc: q('.disc'), rot: q('.disc-rot'), art: q('.disc-art'), bpm: q('.bpm'), pct: q('.pct'), title: q('.d-title'), artist: q('.d-artist'), ov: q('.ov'), el: q('.el'), du: q('.du'), cue: q('.cue'), play: q('.play'), sync: q('.sync'), pitch: q('.d-pitch input') };
+    this.ui = { rem: q('.d-rem'), onair: q('.onair'), disc: q('.disc'), rot: q('.disc-rot'), art: q('.disc-art'), bpm: q('.bpm'), pct: q('.pct'), title: q('.d-title'), artist: q('.d-artist'), el: q('.el'), du: q('.du'), cue: q('.cue'), play: q('.play'), sync: q('.sync'), pitch: q('.d-pitch input') };
     this.ui.art.style.backgroundImage = 'url(logo.jpg)';
     this.ui.play.onclick = () => this.toggle();
     this.ui.cue.onclick = () => this.cuePress();
     this.ui.sync.onclick = () => this.sync();
     this.ui.pitch.oninput = (e) => { this.synced = false; this.setPitch(+e.target.value); };
     this.ui.pitch.ondblclick = () => { this.synced = false; this.setPitch(0); };
-    this.bindJog(); this.bindOverview();
+    this.bindJog();
     this.audio.addEventListener('play', () => this.onState());
     this.audio.addEventListener('pause', () => this.onState());
     this.audio.addEventListener('ended', () => onDeckEnded(this));
@@ -246,7 +354,6 @@ class Deck {
     this.ui.title.textContent = song.title;
     this.ui.artist.textContent = song.artist || '';
     this.ui.cue.classList.remove('armed');
-    this.ovKey = '';
     this.applyNorm();
     this.onState();
     if (needsAnalysis(song)) analyzeSoon(song, true);
@@ -317,13 +424,6 @@ class Deck {
       if (dur) this.audio.currentTime = clamp(this.audio.currentTime + (da / (2 * Math.PI)) * JOG_SECS, 0, dur - 0.05);
     });
   }
-  bindOverview() {
-    const c = this.ui.ov;
-    const seek = (e) => { const r = c.getBoundingClientRect(), d = this.audio.duration; if (d) this.audio.currentTime = clamp((e.clientX - r.left) / r.width, 0, 0.999) * d; };
-    c.addEventListener('pointerdown', (e) => { if (!this.song) return; c.setPointerCapture(e.pointerId); seek(e); });
-    c.addEventListener('pointermove', (e) => { if (c.hasPointerCapture(e.pointerId)) seek(e); });
-  }
-
   onState() {
     const playing = !!this.song && !this.audio.paused;
     this.el.classList.toggle('playing', playing);
@@ -356,7 +456,6 @@ class Deck {
     }
     this.vu = Math.max(lvl, this.vu - 0.025);
     const vu = $('#vu' + this.idx + ' i'); if (vu) vu.style.width = (1 - this.vu) * 100 + '%';
-    drawOverview(this);
   }
 }
 
@@ -527,24 +626,6 @@ function drawWaves() {
   const tag = f.k + (b.song ? b.k : '');
   if (tag !== tagShown) { tagShown = tag; $('#tagFront').textContent = f.k; $('#tagBack').textContent = b.k + ' atrás'; $('#tagBack').hidden = !b.song; }
 }
-function drawOverview(d) {
-  const cv = d.ui.ov, dpr = fitCanvas(cv), x = cv.getContext('2d'), W = cv.width, H = cv.height, s = d.song;
-  x.clearRect(0, 0, W, H);
-  if (!s) return;
-  const dur = d.audio.duration || s.dur, f = dur ? d.audio.currentTime / dur : 0;
-  if (s.amp) {
-    const key = W + ':' + s.id;
-    if (d.ovKey !== key) { // alturas por columna (se calculan una vez)
-      d.ovKey = key; const cols = Math.floor(W / 2), out = new Float32Array(cols), n = s.amp.length;
-      for (let c = 0; c < cols; c++) { let m = 0; for (let i = Math.floor((c * n) / cols), e = Math.floor(((c + 1) * n) / cols); i < e; i++) if (s.amp[i] > m) m = s.amp[i]; out[c] = m / 255; }
-      d.ovCols = out;
-    }
-    const cols = d.ovCols, cut = f * cols.length;
-    for (let c = 0; c < cols.length; c++) { const h = Math.max(1, cols[c] * (H / 2 - 2)); x.fillStyle = c < cut ? C.played : C.rest; x.fillRect(c * 2, H / 2 - h, 1.5, h * 2); }
-  } else { x.fillStyle = C.played; x.fillRect(0, H / 2 - dpr, f * W, 2 * dpr); }
-  if (d.cue > 0.05 && dur) { x.fillStyle = C.gold; x.fillRect(Math.round((d.cue / dur) * W), 0, 2 * dpr, H); }
-  x.fillStyle = C.head; x.fillRect(Math.round(f * W) - dpr, 0, 2 * dpr, H);
-}
 function loop() { decks.forEach((d) => d.tick()); drawWaves(); requestAnimationFrame(loop); }
 
 /* ---------------- Barritas y botones del mezclador ---------------- */
@@ -561,9 +642,8 @@ bindSlider($('#masterR'), 90, (v) => { S.master = v; if (master) master.gain.set
 $$('.voz').forEach((b) => { b.onclick = () => { const d = decks[+b.dataset.d]; d.setNoVoice(!d.noVoice); }; });
 $('#mixSecs').value = String(S.mixSecs);
 $('#mixSecs').onchange = (e) => { S.mixSecs = +e.target.value; saveS(); };
-function setAutomix(on) { S.automix = on; $('#autoChk').checked = $('#autoChk2').checked = on; saveS(); renderMarks(); }
+function setAutomix(on) { S.automix = on; $('#autoChk').checked = on; saveS(); renderMarks(); }
 $('#autoChk').onchange = (e) => setAutomix(e.target.checked);
-$('#autoChk2').onchange = (e) => setAutomix(e.target.checked);
 
 /* ---------------- Pantalla encendida y controles del sistema ---------------- */
 let wake = null;
@@ -613,7 +693,7 @@ async function pumpAnalysis() {
     try { await analyzeSong(s); } catch {}
     s.av = AV;
     DB.put(dbRecord(s)).catch(() => {});
-    decks.forEach((d) => { if (d.song === s) { d.applyNorm(); d.showBpm(); d.ovKey = ''; } });
+    decks.forEach((d) => { if (d.song === s) { d.applyNorm(); d.showBpm(); } });
     renderLib();
     await new Promise((r) => setTimeout(r, 30));
   }
@@ -651,11 +731,28 @@ function buildWave(buf) {
   const q = (f) => { const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = Math.min(255, Math.round((f[i] / top) * 255)); return o; };
   return { amp: q(amp), low: q(low) };
 }
-const dbRecord = (s) => ({ id: s.id, blob: s.blob, name: s.name, size: s.size, title: s.title, artist: s.artist, cover: s.cover || null, dur: s.dur || 0, bpm: s.bpm || 0, beats: s.beats || null, amp: s.amp || null, low: s.low || null, lufs: s.lufs ?? null, peak: s.peak || 0, av: s.av || 0, analyzed: s.av === AV });
+const TAGV = 2; // versión del lector de etiquetas: las canciones viejas se vuelven a leer para sacar la carátula
+const dbRecord = (s) => ({ tagv: s.tagv || 0, id: s.id, blob: s.blob, name: s.name, size: s.size, title: s.title, artist: s.artist, cover: s.cover || null, dur: s.dur || 0, bpm: s.bpm || 0, beats: s.beats || null, amp: s.amp || null, low: s.low || null, lufs: s.lufs ?? null, peak: s.peak || 0, av: s.av || 0, analyzed: s.av === AV });
+
+// Canciones guardadas con una versión anterior: se vuelve a leer la carátula (y el título si venía del nombre del archivo)
+async function rescanTags() {
+  let changed = false;
+  for (const s of [...songs.values()]) {
+    if (s.tagv === TAGV || !songs.has(s.id)) continue;
+    const t = await readTags(s.blob);
+    const base = (s.name || '').replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+    if (t.cover && !s.cover) { s.cover = t.cover; changed = true; }
+    if (t.title && s.title === base) { s.title = t.title; changed = true; }
+    if (t.artist && !s.artist) { s.artist = t.artist; changed = true; }
+    s.tagv = TAGV;
+    DB.put(dbRecord(s)).catch(() => {});
+    decks.forEach((d) => { if (d.song === s) { d.ui.art.style.backgroundImage = `url(${artUrl(s)})`; d.ui.title.textContent = s.title; d.ui.artist.textContent = s.artist || ''; } });
+  }
+  if (changed) renderLib();
+}
 
 /* ---------------- Agregar canciones ---------------- */
 const pickFiles = () => $('#fileIn').click();
-$('#addBtn').onclick = pickFiles;
 $('#addBtn2').onclick = pickFiles;
 $('#fileIn').onchange = async (e) => {
   const files = [...e.target.files]; e.target.value = '';
@@ -668,7 +765,7 @@ $('#fileIn').onchange = async (e) => {
     if (s) { dup++; if (view !== 'all') addToList(view, s.id, true); continue; }
     const tags = await readTags(f);
     const base = f.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
-    s = { id: uid(), blob: f, name: f.name, size: f.size, title: tags.title || base, artist: tags.artist || '', cover: tags.cover || null, dur: 0, av: 0 };
+    s = { id: uid(), blob: f, name: f.name, size: f.size, title: tags.title || base, artist: tags.artist || '', cover: tags.cover || null, dur: 0, av: 0, tagv: TAGV };
     songs.set(s.id, s); added++;
     try { await DB.put(dbRecord(s)); } catch { toast('No hay espacio para guardar «' + s.title + '». Se podrá usar solo en esta sesión.', 4500); }
     if (view !== 'all') addToList(view, s.id, true);
@@ -787,7 +884,6 @@ function renderLib() {
   rows.appendChild(frag);
   const total = [...songs.values()].reduce((n, s) => n + (s.size || 0), 0);
   $('#libNote').textContent = songs.size ? `${songs.size} canciones guardadas en este equipo · ${(total / 1048576).toFixed(0)} MB` + (list && qText ? ' · para reordenar, borra la búsqueda' : '') : '';
-  $('#storeNote').textContent = $('#libNote').textContent;
   renderMarks();
 }
 // Marca en la lista qué está en cada deck y qué entra después con el automix
@@ -819,34 +915,60 @@ function loadFromView(deck, s, ids) {
 }
 $('#search').oninput = renderLib;
 
+/* ---------------- Recordar los decks (por si la página se recarga) ---------------- */
+function saveSession() {
+  store.set('cem.session', {
+    xf: mix ? mix.to : xf,
+    decks: decks.map((d) => Object.assign({ vol: d.vol, eq: d.eq, noVoice: d.noVoice },
+      d.song ? { id: d.song.id, t: d.audio.currentTime, cue: d.cue, pitch: d.pitch, synced: d.synced, queue: d.queue, qi: d.qi, prepared: d.prepared || d.audio.paused } : {})),
+  });
+}
+function restoreSession() {
+  const ss = store.get('cem.session', null);
+  if (!ss || !Array.isArray(ss.decks)) return;
+  ss.decks.forEach((st, i) => {
+    const d = decks[i]; if (!d || !st) return;
+    if (st.eq) { d.eq = Object.assign({ high: 0, mid: 0, low: 0 }, st.eq); for (const b of ['high', 'mid', 'low']) { const el = $(`.mixer input[data-d="${i}"][data-band="${b}"]`); if (el) el.value = d.eq[b]; } }
+    if (st.vol != null) { d.vol = clamp(+st.vol, 0, 1); const el = $(`.mixer input[data-d="${i}"][data-vol]`); if (el) el.value = Math.round(d.vol * 100); }
+    if (st.noVoice) d.setNoVoice(true, true);
+    const s = st.id && songs.get(st.id);
+    if (!s) return;
+    d.load(s, Array.isArray(st.queue) ? st.queue : null, st.qi ?? -1, !!st.prepared);
+    d.cue = +st.cue || 0; d.ui.cue.classList.toggle('armed', d.cue > 0.05);
+    d.synced = !!st.synced; d.setPitch(+st.pitch || 0);
+    const t = +st.t || 0;
+    if (t > 0) d.audio.addEventListener('loadedmetadata', () => { d.audio.currentTime = Math.min(t, Math.max(0, (d.audio.duration || t) - 0.5)); }, { once: true });
+  });
+  xf = clamp(+ss.xf || 0, 0, 1); applyXf();
+  if (decks.some((d) => d.song)) toast('Los decks quedaron como estaban. Toca ▶ para seguir.', 3500);
+}
+setInterval(saveSession, 2000);
+window.addEventListener('pagehide', saveSession);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSession(); });
+// Si hay música sonando, el navegador pide confirmación antes de recargar o cerrar la página
+window.addEventListener('beforeunload', (e) => { saveSession(); if (decks.some((d) => d.song && !d.audio.paused)) { e.preventDefault(); e.returnValue = ''; } });
+
 /* ---------------- Ajustes, tema e instalación ---------------- */
-const setDlg = $('#settings');
-$('#setBtn').onclick = () => setDlg.showModal();
-$('#setClose').onclick = () => setDlg.close();
-$('#levelChk').onchange = (e) => { S.level = e.target.checked; decks.forEach((d) => d.applyNorm()); saveS(); };
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('cem.theme', t); } catch {}
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#1a1710' : '#f8f1de';
-  $('#darkChk').checked = t === 'dark';
-  readColors(); decks.forEach((d) => { d.ovKey = ''; });
+  const b = $('#themeBtn'); b.innerHTML = t === 'dark' ? ICON.sun : ICON.moon; b.setAttribute('aria-label', t === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+  readColors();
 }
-$('#darkChk').onchange = (e) => applyTheme(e.target.checked ? 'dark' : 'light');
-let installEvt = null;
-window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#installBtn').hidden = false; });
-$('#installBtn').onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice.catch(() => {}); installEvt = null; $('#installBtn').hidden = true; };
-window.addEventListener('appinstalled', () => { $('#installBtn').hidden = true; });
+$('#themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
 
 (async function start() {
-  $('#setBtn').innerHTML = ICON.settings; $('#addBtn').innerHTML = ICON.plus;
   $('#addBtn2').innerHTML = ICON.plus + ' Agregar';
   applyTheme(document.documentElement.dataset.theme);
-  $('#levelChk').checked = S.level; setAutomix(S.automix);
+  setAutomix(S.automix);
   applyXf(); loop();
   try {
     for (const r of await DB.all()) songs.set(r.id, Object.assign({ bpm: 0, av: 0 }, r));
   } catch { toast('Este navegador no permite guardar canciones; solo funcionarán durante esta sesión.', 5000); }
   renderLib();
   songs.forEach((s) => { if (needsAnalysis(s)) analyzeSoon(s); });
+  restoreSession();
+  rescanTags();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

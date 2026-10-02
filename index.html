@@ -24,8 +24,7 @@
 <header class="top">
   <img src="logo.jpg" alt="">
   <div class="brand">CENTRO EVANGÉLICO MUNDIAL - SALTO</div>
-  <button class="ibtn" id="setBtn" aria-label="Ajustes"></button>
-  <button class="ibtn" id="addBtn" aria-label="Agregar canciones"></button>
+  <button class="ibtn" id="themeBtn" aria-label="Cambiar a modo oscuro"></button>
 </header>
 
 <main class="console">
@@ -84,18 +83,6 @@
     <div class="note" id="libNote"></div>
   </section>
 </main>
-
-<dialog id="settings">
-  <h3>Ajustes</h3>
-  <div class="group">
-    <label class="set"><div class="tx"><b>Nivelar volumen</b><small>Iguala el volumen entre canciones.</small></div><input type="checkbox" id="levelChk" class="sw"></label>
-    <label class="set"><div class="tx"><b>Automix</b><small>Al terminar una canción, entra la siguiente de la lista en el otro deck.</small></div><input type="checkbox" id="autoChk2" class="sw"></label>
-    <label class="set"><div class="tx"><b>Modo oscuro</b></div><input type="checkbox" id="darkChk" class="sw"></label>
-    <button class="set" id="installBtn" hidden><div class="tx"><b>Instalar en la pantalla de inicio</b></div></button>
-  </div>
-  <div class="note" id="storeNote"></div>
-  <div class="col"><button class="pill on" id="setClose">Listo</button></div>
-</dialog>
 
 <input type="file" id="fileIn" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
 <dialog id="sheet"><h3 id="sheetTitle"></h3><p id="sheetText" hidden></p><input type="text" id="sheetInput" hidden><div class="col" id="sheetBtns"></div></dialog>
