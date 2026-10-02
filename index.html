@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f8f1de">
+<meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="CEM DJ">
@@ -38,39 +38,33 @@
   <section class="panel deck" id="deckA" aria-label="Deck A"></section>
   <section class="panel deck" id="deckB" aria-label="Deck B"></section>
 
-  <!-- Mezclador -->
+  <!-- Mezclador (compacto) -->
   <section class="panel mixer" aria-label="Mezclador">
-    <div class="strip" data-d="0">
-        <label class="sl"><small>Agudos</small><input type="range" class="bip" min="-12" max="12" step="0.5" value="0" data-d="0" data-band="high" aria-label="Agudos deck A"></label>
-        <label class="sl"><small>Medios</small><input type="range" class="bip" min="-12" max="12" step="0.5" value="0" data-d="0" data-band="mid" aria-label="Medios deck A"></label>
-        <label class="sl"><small>Graves</small><input type="range" class="bip" min="-12" max="12" step="0.5" value="0" data-d="0" data-band="low" aria-label="Graves deck A"></label>
-        <label class="sl"><small>Volumen</small><input type="range" min="0" max="100" value="100" data-d="0" data-vol aria-label="Volumen deck A"></label>
-        <div class="vu" id="vu0"><i></i></div>
-        <button class="pill sm voz" data-d="0">Sin voz</button>
+    <div class="mx-vol" data-d="0">
+      <label class="sl"><small>Vol A</small><input type="range" min="0" max="100" value="100" data-d="0" data-vol aria-label="Volumen deck A"></label>
+      <div class="vu" id="vu0"><i></i></div>
+    </div>
+    <button class="pill on" id="mixBtn">Mezclar A → B</button>
+    <div class="mx-vol rev" data-d="1">
+      <label class="sl"><small>Vol B</small><input type="range" min="0" max="100" value="100" data-d="1" data-vol aria-label="Volumen deck B"></label>
+      <div class="vu" id="vu1"><i></i></div>
     </div>
 
-    <div class="center">
-      <button class="pill on" id="mixBtn">Mezclar A → B</button>
-      <label class="auto"><span>Automix</span><input type="checkbox" class="sw" id="autoChk"></label>
-      <select id="mixSecs" aria-label="Duración de la mezcla">
-        <option value="4">Mezcla 4 s</option><option value="8">Mezcla 8 s</option><option value="12">Mezcla 12 s</option><option value="16">Mezcla 16 s</option>
-      </select>
-      <label class="sl col"><small>General</small><input type="range" id="masterR" min="0" max="100" value="90" aria-label="Volumen general"></label>
-    </div>
-
-    <div class="strip rev" data-d="1">
-        <label class="sl"><small>Agudos</small><input type="range" class="bip" min="-12" max="12" step="0.5" value="0" data-d="1" data-band="high" aria-label="Agudos deck B"></label>
-        <label class="sl"><small>Medios</small><input type="range" class="bip" min="-12" max="12" step="0.5" value="0" data-d="1" data-band="mid" aria-label="Medios deck B"></label>
-        <label class="sl"><small>Graves</small><input type="range" class="bip" min="-12" max="12" step="0.5" value="0" data-d="1" data-band="low" aria-label="Graves deck B"></label>
-        <label class="sl"><small>Volumen</small><input type="range" min="0" max="100" value="100" data-d="1" data-vol aria-label="Volumen deck B"></label>
-        <div class="vu" id="vu1"><i></i></div>
-        <button class="pill sm voz" data-d="1">Sin voz</button>
-    </div>
+    <button class="pill sm voz" data-d="0">Sin voz</button>
+    <label class="auto"><span>Automix</span><input type="checkbox" class="sw" id="autoChk"></label>
+    <button class="pill sm voz" data-d="1">Sin voz</button>
 
     <div class="xfrow">
       <b>A</b>
       <input type="range" id="xfade" min="0" max="1000" value="0" aria-label="Crossfader">
       <b>B</b>
+    </div>
+
+    <div class="mx-foot">
+      <select id="mixSecs" aria-label="Duración de la mezcla">
+        <option value="4">Mezcla 4 s</option><option value="8">Mezcla 8 s</option><option value="12">Mezcla 12 s</option><option value="16">Mezcla 16 s</option>
+      </select>
+      <label class="sl gen"><small>General</small><input type="range" id="masterR" min="0" max="100" value="90" aria-label="Volumen general"></label>
     </div>
   </section>
 
@@ -87,6 +81,7 @@
 <input type="file" id="fileIn" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus" multiple hidden>
 <dialog id="sheet"><h3 id="sheetTitle"></h3><p id="sheetText" hidden></p><input type="text" id="sheetInput" hidden><div class="col" id="sheetBtns"></div></dialog>
 <div class="toast" id="toast"></div>
+<div class="rotate" role="alert"><img src="logo.jpg" alt=""><b>Gira el celular a vertical</b><small>CEM DJ se usa con el celular parado. La música sigue sonando.</small></div>
 
 <script src="bpm.js"></script>
 <script src="lufs.js"></script>

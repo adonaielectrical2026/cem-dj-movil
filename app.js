@@ -283,16 +283,13 @@ class Deck {
         <button class="pill cue" aria-label="Punto de inicio (CUE) del deck ${k}">CUE</button>
         <button class="pill on play" aria-label="Reproducir o pausar el deck ${k}">${ICON.play}</button>
         <button class="pill sync" aria-label="Igualar el tempo del deck ${k} con el otro deck">SYNC</button>
-      </div>
-      <label class="d-pitch"><small>Tempo</small><input type="range" min="-${PITCH}" max="${PITCH}" step="0.1" value="0" aria-label="Tempo del deck ${k}"></label>`;
+      </div>`;
     const q = (s) => this.el.querySelector(s);
-    this.ui = { rem: q('.d-rem'), onair: q('.onair'), disc: q('.disc'), rot: q('.disc-rot'), art: q('.disc-art'), bpm: q('.bpm'), pct: q('.pct'), title: q('.d-title'), artist: q('.d-artist'), el: q('.el'), du: q('.du'), cue: q('.cue'), play: q('.play'), sync: q('.sync'), pitch: q('.d-pitch input') };
+    this.ui = { rem: q('.d-rem'), onair: q('.onair'), disc: q('.disc'), rot: q('.disc-rot'), art: q('.disc-art'), bpm: q('.bpm'), pct: q('.pct'), title: q('.d-title'), artist: q('.d-artist'), el: q('.el'), du: q('.du'), cue: q('.cue'), play: q('.play'), sync: q('.sync') };
     this.ui.art.style.backgroundImage = 'url(logo.jpg)';
     this.ui.play.onclick = () => this.toggle();
     this.ui.cue.onclick = () => this.cuePress();
     this.ui.sync.onclick = () => this.sync();
-    this.ui.pitch.oninput = (e) => { this.synced = false; this.setPitch(+e.target.value); };
-    this.ui.pitch.ondblclick = () => { this.synced = false; this.setPitch(0); };
     this.bindJog();
     this.audio.addEventListener('play', () => this.onState());
     this.audio.addEventListener('pause', () => this.onState());
@@ -319,7 +316,13 @@ class Deck {
     this.fader.connect(this.an);
     this.applyEq(); this.applyVol(); this.setNoVoice(this.noVoice, true); this.applyNorm();
   }
-  applyEq() { if (this.built) for (const b of ['low', 'mid', 'high']) this[b].gain.setTargetAtTime(this.eq[b], AC.currentTime, 0.02); }
+  // Ecualización automática: la que calculó el análisis de la canción (0 si no hace falta corregir nada)
+  eqBase(b) { return this.song && this.song.eqAuto ? this.song.eqAuto[b] || 0 : 0; }
+  applyEq() {
+    if (!this.built) return;
+    const t = AC.currentTime;
+    for (const b of ['low', 'mid', 'high']) { const g = this[b].gain; g.cancelScheduledValues(t); g.setTargetAtTime(this.eqBase(b), t, 0.05); }
+  }
   applyVol() { if (this.built) this.fader.gain.setTargetAtTime(this.vol * this.vol, AC.currentTime, 0.02); }
   applyNorm() {
     if (!this.built) return;
@@ -354,7 +357,7 @@ class Deck {
     this.ui.title.textContent = song.title;
     this.ui.artist.textContent = song.artist || '';
     this.ui.cue.classList.remove('armed');
-    this.applyNorm();
+    this.applyNorm(); if (!mix) this.applyEq();
     this.onState();
     if (needsAnalysis(song)) analyzeSoon(song, true);
     renderLib();
@@ -389,7 +392,6 @@ class Deck {
   setPitch(p) {
     this.pitch = clamp(Math.round(p * 10) / 10, -PITCH, PITCH);
     this.audio.playbackRate = 1 + this.pitch / 100;
-    this.ui.pitch.value = this.pitch;
     this.ui.sync.classList.toggle('on', this.synced);
     this.showBpm();
   }
@@ -482,6 +484,14 @@ function mixTo(to, secs, from) {
   const ga = new Float32Array(N), gb = new Float32Array(N);
   for (let k = 0; k < N; k++) { const g = gainsFor(x0 + ((to - x0) * k) / (N - 1)); ga[k] = g[0]; gb[k] = g[1]; }
   [ga, gb].forEach((curve, i) => { const p = decks[i].xf.gain; p.cancelScheduledValues(t0); p.setValueCurveAtTime(curve, t0, secs); });
+  // Cambio de graves: mientras dura la mezcla, la canción que entra llega sin graves y en la mitad
+  // se pasan los graves de una a la otra, para que los bajos de las dos no se encimen.
+  if (from && from !== decks[to] && secs >= 2) {
+    const inc = decks[to], cut = -14, edge = (k, a, b) => Math.max(0, Math.min(1, (k - a) / (b - a)));
+    const ci = new Float32Array(N), co = new Float32Array(N);
+    for (let k = 0; k < N; k++) { const f = edge(k / (N - 1), 0.42, 0.58); ci[k] = inc.eqBase('low') + cut * (1 - f); co[k] = from.eqBase('low') + cut * f; }
+    [[inc, ci], [from, co]].forEach(([d, c]) => { const g = d.low.gain; g.cancelScheduledValues(t0); g.setValueCurveAtTime(c, t0, secs); });
+  }
   mix = { t0, secs, x0, to, from };
   $('#mixBtn').disabled = true;
   clearTimeout(mixTimer); mixTimer = setTimeout(tickMix, secs * 1000 + 80);
@@ -492,7 +502,7 @@ function tickMix() {
   xf = mix.x0 + (mix.to - mix.x0) * k;
   $('#xfade').value = Math.round(xf * 1000);
   if (k >= 1) {
-    const m = mix; mix = null; xf = m.to; $('#mixBtn').disabled = false; applyXf();
+    const m = mix; mix = null; xf = m.to; $('#mixBtn').disabled = false; applyXf(); decks.forEach((d) => d.applyEq());
     if (m.from && m.from !== decks[m.to]) m.from.pause();
     renderMarks();
   }
@@ -501,7 +511,7 @@ function cancelMix() {
   if (!mix) return;
   const k = Math.min(1, (AC.currentTime - mix.t0) / mix.secs);
   xf = mix.x0 + (mix.to - mix.x0) * k; mix = null; clearTimeout(mixTimer);
-  $('#mixBtn').disabled = false; applyXf();
+  $('#mixBtn').disabled = false; applyXf(); decks.forEach((d) => d.applyEq());
 }
 $('#xfade').oninput = (e) => { ensureAudio(); cancelMix(); xf = e.target.value / 1000; applyXf(); renderMarks(); };
 $('#mixBtn').onclick = () => {
@@ -629,10 +639,6 @@ function drawWaves() {
 function loop() { decks.forEach((d) => d.tick()); drawWaves(); requestAnimationFrame(loop); }
 
 /* ---------------- Barritas y botones del mezclador ---------------- */
-$$('.mixer input[data-band]').forEach((el) => {
-  const d = decks[+el.dataset.d], band = el.dataset.band;
-  bindSlider(el, 0, (v) => { d.eq[band] = v; d.applyEq(); });
-});
 $$('.mixer input[data-vol]').forEach((el) => {
   const d = decks[+el.dataset.d];
   bindSlider(el, 100, (v) => { d.vol = v / 100; d.applyVol(); });
@@ -667,7 +673,7 @@ function setMediaSession() {
 }
 
 /* ---------------- Análisis (duración, volumen, BPM, golpes y onda) ---------------- */
-const AV = 2; // versión del análisis: las canciones viejas se vuelven a analizar para tener onda y BPM
+const AV = 3; // versión del análisis: las canciones viejas se vuelven a analizar para tener onda y BPM
 const needsAnalysis = (s) => s.av !== AV;
 function probeDuration(blob) {
   return new Promise((res) => {
@@ -693,7 +699,7 @@ async function pumpAnalysis() {
     try { await analyzeSong(s); } catch {}
     s.av = AV;
     DB.put(dbRecord(s)).catch(() => {});
-    decks.forEach((d) => { if (d.song === s) { d.applyNorm(); d.showBpm(); } });
+    decks.forEach((d) => { if (d.song === s) { d.applyNorm(); d.showBpm(); if (!mix) d.applyEq(); } });
     renderLib();
     await new Promise((r) => setTimeout(r, 30));
   }
@@ -711,6 +717,7 @@ async function analyzeSong(s) {
   const r = on ? bpmFromOnset(on) : null;
   if (r && r.bpm > 0) { s.bpm = r.bpm; s.beats = trackBeats(on, r.bpm); }
   Object.assign(s, buildWave(buf));
+  s.eqAuto = autoEq(buf);
 }
 // Onda resumida: amplitud total y de graves (hasta ~180 Hz), 50 columnas por segundo
 function buildWave(buf) {
@@ -731,8 +738,26 @@ function buildWave(buf) {
   const q = (f) => { const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = Math.min(255, Math.round((f[i] / top) * 255)); return o; };
   return { amp: q(amp), low: q(low) };
 }
+// Ecualización automática: compara cuánto hay de graves (< ~200 Hz) y de agudos (> ~5 kHz) con una mezcla
+// equilibrada. Solo corrige si la diferencia es grande, y como mucho ±3 dB, para no cambiar el carácter de la canción.
+function autoEq(buf) {
+  const sr = buf.sampleRate, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const aL = 1 - Math.exp((-2 * Math.PI * 200) / sr), aH = 1 - Math.exp((-2 * Math.PI * 5000) / sr);
+  let lp = 0, lp5 = 0, eT = 0, eL = 0, eH = 0;
+  for (let i = 0; i < L.length; i++) {
+    const v = (L[i] + R[i]) * 0.5;
+    lp += aL * (v - lp); lp5 += aH * (v - lp5);
+    const hi = v - lp5;
+    eT += v * v; eL += lp * lp; eH += hi * hi;
+  }
+  if (eT < 1e-9) return { low: 0, mid: 0, high: 0 };
+  const db = (x) => 10 * Math.log10(Math.max(x, 1e-12) / eT);
+  // valores de referencia medidos en grabaciones reales; zona sin corrección de ±5 dB
+  const fix = (rel, target) => { const d = target - rel; return Math.abs(d) > 5 ? Math.round(Math.max(-3, Math.min(3, d * 0.5)) * 2) / 2 : 0; };
+  return { low: fix(db(eL), -4.5), mid: 0, high: fix(db(eH), -23) };
+}
 const TAGV = 2; // versión del lector de etiquetas: las canciones viejas se vuelven a leer para sacar la carátula
-const dbRecord = (s) => ({ tagv: s.tagv || 0, id: s.id, blob: s.blob, name: s.name, size: s.size, title: s.title, artist: s.artist, cover: s.cover || null, dur: s.dur || 0, bpm: s.bpm || 0, beats: s.beats || null, amp: s.amp || null, low: s.low || null, lufs: s.lufs ?? null, peak: s.peak || 0, av: s.av || 0, analyzed: s.av === AV });
+const dbRecord = (s) => ({ tagv: s.tagv || 0, id: s.id, blob: s.blob, name: s.name, size: s.size, title: s.title, artist: s.artist, cover: s.cover || null, dur: s.dur || 0, bpm: s.bpm || 0, beats: s.beats || null, amp: s.amp || null, low: s.low || null, lufs: s.lufs ?? null, peak: s.peak || 0, eqAuto: s.eqAuto || null, av: s.av || 0, analyzed: s.av === AV });
 
 // Canciones guardadas con una versión anterior: se vuelve a leer la carátula (y el título si venía del nombre del archivo)
 async function rescanTags() {
@@ -915,6 +940,20 @@ function loadFromView(deck, s, ids) {
 }
 $('#search').oninput = renderLib;
 
+/* ---------------- Solo vertical ---------------- */
+// En la app instalada se traba la pantalla en vertical; en el navegador, si el celular está acostado se pide girarlo.
+const isPhone = () => matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600;
+function lockPortrait() { try { const o = screen.orientation; if (o && o.lock) o.lock('portrait').catch(() => {}); } catch {} }
+function checkOrientation() {
+  const o = screen.orientation && screen.orientation.type;
+  const land = o ? o.startsWith('landscape') : Math.abs(window.orientation || 0) === 90;
+  document.documentElement.classList.toggle('landscape-phone', isPhone() && land);
+}
+if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', checkOrientation);
+window.addEventListener('orientationchange', checkOrientation);
+window.addEventListener('resize', checkOrientation);
+document.addEventListener('pointerdown', lockPortrait, { once: true });
+
 /* ---------------- Recordar los decks (por si la página se recarga) ---------------- */
 function saveSession() {
   store.set('cem.session', {
@@ -928,7 +967,6 @@ function restoreSession() {
   if (!ss || !Array.isArray(ss.decks)) return;
   ss.decks.forEach((st, i) => {
     const d = decks[i]; if (!d || !st) return;
-    if (st.eq) { d.eq = Object.assign({ high: 0, mid: 0, low: 0 }, st.eq); for (const b of ['high', 'mid', 'low']) { const el = $(`.mixer input[data-d="${i}"][data-band="${b}"]`); if (el) el.value = d.eq[b]; } }
     if (st.vol != null) { d.vol = clamp(+st.vol, 0, 1); const el = $(`.mixer input[data-d="${i}"][data-vol]`); if (el) el.value = Math.round(d.vol * 100); }
     if (st.noVoice) d.setNoVoice(true, true);
     const s = st.id && songs.get(st.id);
@@ -952,7 +990,7 @@ window.addEventListener('beforeunload', (e) => { saveSession(); if (decks.some((
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('cem.theme', t); } catch {}
-  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#1a1710' : '#f8f1de';
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#1a1710' : '#ffffff';
   const b = $('#themeBtn'); b.innerHTML = t === 'dark' ? ICON.sun : ICON.moon; b.setAttribute('aria-label', t === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
   readColors();
 }
@@ -969,6 +1007,7 @@ $('#themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme
   renderLib();
   songs.forEach((s) => { if (needsAnalysis(s)) analyzeSoon(s); });
   restoreSession();
+  checkOrientation(); lockPortrait();
   rescanTags();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
